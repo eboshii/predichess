@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Predichess - Tactical Cyber Chess</title>
+  <meta name="description" content="Play Predichess, a tactical chess variant with hidden predictions and piece destruction.">
+  
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Background neon glows -->
+  <div class="bg-glow-1"></div>
+  <div class="bg-glow-2"></div>
+
+  <!-- Main App Root -->
+  <div id="app-root">
+
+    <!-- 1. LOGIN SCREEN -->
+    <div id="screen-login" class="screen auth-screen">
+      <div class="auth-container">
+        <h1 class="login-title">PREDICHESS</h1>
+        <button id="btn-google-login" class="btn-outlined-blue">SIGN IN WITH GOOGLE</button>
+      </div>
+    </div>
+
+    <!-- 2. USERNAME SCREEN -->
+    <div id="screen-username" class="screen auth-screen">
+      <div class="auth-container">
+        <h1 class="username-title">choose a username</h1>
+        <form id="username-form" class="username-form" onsubmit="return false;">
+          <input type="text" id="username-input" class="form-input" placeholder="username" maxlength="20" required autocomplete="off">
+          <div id="username-error" class="validation-error">Username is already taken.</div>
+          <button id="btn-submit-username" class="btn-outlined-white">CONFIRM</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 3. DASHBOARD / LOBBY SCREEN -->
+    <div id="screen-dashboard" class="screen">
+      <div class="dashboard-layout">
+        
+        <!-- Top Dashboard Header -->
+        <header class="lobby-header">
+          <div class="header-left">
+            <h1 class="lobby-title">PREDICHESS</h1>
+            <div id="user-display-name" class="username-subtext">...</div>
+          </div>
+          <div class="header-right">
+            <button id="btn-dashboard-help" class="btn-text-blue">HELP</button>
+            <button id="btn-dashboard-logout" class="btn-text-red">LOGOUT</button>
+          </div>
+        </header>
+
+        <!-- TabLayout Buttons -->
+        <div class="tab-layout">
+          <button id="tab-play" class="tab-button active">PLAY</button>
+          <button id="tab-friends" class="tab-button">FRIENDS</button>
+        </div>
+
+        <!-- Main Dashboard Viewport -->
+        <main class="dashboard-content">
+          
+          <!-- TAB A: PLAY PANEL -->
+          <div id="pane-play" class="tab-pane active">
+            <div class="dashboard-grid">
+              
+              <!-- Active Games List -->
+              <div class="card-panel">
+                <div class="panel-header">
+                  <h3 class="panel-title">OPEN GAMES</h3>
+                </div>
+                <div class="scroll-container" id="open-games-list">
+                  <!-- JS Dynamic Insertion -->
+                  <div class="empty-state">
+                    <p>No active games</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Mini stats/lobby info -->
+              <div class="card-panel rules-panel">
+                <div class="panel-header">
+                  <h3 class="panel-title">GAME RULES BRIEFING</h3>
+                </div>
+                <div class="scroll-container rules-text">
+                  <p>Welcome to <strong>Predichess</strong>, a cyber-tactical chess variant equipped with hidden prediction mechanics.</p>
+                  <p><strong>1. The Turn Cycle:</strong> After making your chess move, you do not pass the turn immediately. You enter the <em>Predict</em> phase. You must click and drag an opponent's piece to designate where you think they will move on their turn.</p>
+                  <p><strong>2. Sprung Traps:</strong> If the opponent makes exactly the move you predicted, a tactical trap is sprung! Their moving piece is <strong>vaporized (destroyed)</strong> before completing its move, and they keep their turn to make a compensation move.</p>
+                  <p><strong>3. Victory:</strong> Win by checkmate, stalemate, or by vaporizing the opponent's King!</p>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- TAB B: FRIENDS PANEL -->
+          <div id="pane-friends" class="tab-pane">
+            <div class="dashboard-grid">
+              
+              <!-- Friends list and Adding Section -->
+              <div class="card-panel">
+                <!-- Add username search -->
+                <div class="friend-search-container">
+                  <input type="text" id="add-friend-input" class="friend-add-input" placeholder="add by username" autocomplete="off">
+                  <button id="btn-add-friend" class="btn-outlined-blue-small">SEND REQUEST</button>
+                </div>
+
+                <div class="panel-header" id="header-pending" style="display:none; margin-top:20px;">
+                  <h3 class="panel-title">PENDING REQUESTS</h3>
+                </div>
+                <div class="scroll-container pending-container" id="incoming-requests-list">
+                  <!-- JS dynamic list -->
+                </div>
+
+                <div class="panel-header" id="header-friends" style="margin-top:20px;">
+                  <h3 class="panel-title">FRIENDS</h3>
+                </div>
+                <div class="scroll-container" id="friends-list">
+                  <div class="empty-state">
+                    <p>No friends added yet</p>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </main>
+      </div>
+    </div>
+
+    <!-- 4. GAME ROOM SCREEN -->
+    <div id="screen-game" class="screen">
+      <div class="game-layout">
+        
+        <!-- Left Side: Interactive Chess Board -->
+        <div class="game-board-container">
+          
+          <!-- Opponent Bar -->
+          <div class="opponent-bar-top">
+            <button id="btn-game-exit" class="btn-back-text">←</button>
+            <div class="opp-bullet-indicator"></div>
+            <span id="game-opponent-name" class="opponent-text-name">Opponent</span>
+            <button id="btn-game-resign" class="btn-resign-text">RESIGN</button>
+          </div>
+
+          <!-- Board Wrapper -->
+          <div class="board-wrapper">
+            <div id="chess-board-grid" class="chess-board">
+              <!-- JS Grid Generation -->
+            </div>
+            <!-- Prediction phase overlay -->
+            <div id="prediction-tint-overlay" class="prediction-tint"></div>
+            
+            <!-- Pawn Promotion Modal (Inside Board) -->
+            <div id="promotion-dialog" class="promotion-overlay">
+              <div class="promotion-box">
+                <div class="promo-option" data-promo="QUEEN" id="promo-q"></div>
+                <div class="promo-option" data-promo="ROOK" id="promo-r"></div>
+                <div class="promo-option" data-promo="BISHOP" id="promo-b"></div>
+                <div class="promo-option" data-promo="KNIGHT" id="promo-n"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- My Info Bar -->
+          <div class="my-info-bar-bottom">
+            <div class="my-name-display" id="game-my-name">You</div>
+            <div class="turn-status-text-display" id="game-turn-banner">WAITING FOR OPPONENT</div>
+          </div>
+
+          <!-- Navigation Controls Row -->
+          <div class="navigation-controls-row">
+            <button id="btn-game-first" class="btn-game-control" title="First Move">⏮</button>
+            <button id="btn-game-prev" class="btn-game-control" title="Previous Move">◀</button>
+            <button id="btn-game-next" class="btn-game-control" title="Next Move">▶</button>
+            <button id="btn-game-last" class="btn-game-live" title="Live Board">LIVE</button>
+          </div>
+
+        </div>
+
+        <!-- Right Side: Move Log Card -->
+        <aside class="game-log-panel">
+          <div class="move-log-title">MOVE LOG &amp; PREDICTIONS</div>
+          <div id="game-move-log" class="move-log">
+            <!-- JS Injections -->
+          </div>
+        </aside>
+
+      </div>
+    </div>
+
+    <!-- 5. HOW TO PLAY / HELP SCREEN -->
+    <div id="screen-help" class="screen">
+      <div class="dashboard-content" style="padding: 60px 24dp; display: flex; flex-direction: column;">
+        <header class="tab-header" style="max-width: 700px; margin: 0 auto 30px auto; width: 100%;">
+          <button id="btn-help-back" class="btn-text-blue" style="width: fit-content; margin-bottom: 20px; display: inline-flex; align-items: center; gap: 8px;">
+            ← BACK TO DASHBOARD
+          </button>
+          <h2 class="tab-title" style="font-family: 'sans-serif-light'; font-size: 24px; letter-spacing: 0.1em; color: #fff;">PREDICHESS GUIDE</h2>
+          <p class="tab-subtitle">Comprehensive rules for the tactical prediction system</p>
+        </header>
+
+        <div class="help-content">
+          <div class="help-card">
+            
+            <div class="help-section">
+              <h3 class="help-heading">
+                Core Concept: The Prediction Phase
+              </h3>
+              <p class="help-text">
+                Predichess is played on a standard chess board with regular pieces, but with a highly crucial twist. Every time you make a move, you do not immediately pass the turn to the opponent. Instead, your screen flips, and you enter the <strong>Prediction Mode</strong>.
+              </p>
+              <p class="help-text">
+                During this mode, you select one of your opponent's pieces and click-and-drag it to designate where you think they will move on their turn. Once submitted, your prediction is locked in silently, and the turn passes to your opponent.
+              </p>
+            </div>
+
+            <div class="help-section">
+              <h3 class="help-heading">
+                Sprung Traps & Piece Vaporization
+              </h3>
+              <p class="help-text">
+                When the opponent makes a move, the system automatically checks if it matches your pending prediction:
+              </p>
+              <ul class="help-rule-list">
+                <li>
+                  <strong>Direct Hit (Trap Sprung!):</strong> If they make exactly the move you predicted, a tactical trap is sprung! Their moving piece is <strong>vaporized (destroyed)</strong> before it can complete its path.
+                </li>
+                <li>
+                  <strong>Compensation Move:</strong> Since their piece was destroyed, they retain the turn to make another move (a compensation move). No predictions are checked on a compensation move, and they cannot trigger traps.
+                </li>
+                <li>
+                  <strong>Trap Missed:</strong> If they make any other move, their move completes normally, and the prediction is cleared without effect.
+                </li>
+              </ul>
+            </div>
+
+            <div class="help-section">
+              <h3 class="help-heading">
+                Tactical Victory Conditions
+              </h3>
+              <p class="help-text">
+                There are multiple ways to claim victory on the battleground:
+              </p>
+              <ul class="help-rule-list">
+                <li><strong>Checkmate:</strong> Traditional chess checkmate wins the game.</li>
+                <li><strong>King Vaporization (The ultimate trap!):</strong> If you predict exactly where the opponent will move their King, and they make that move, their King is vaporized! This is an immediate tactical knockout!</li>
+                <li><strong>Resignation:</strong> Opponent resigns out of sheer tactical defeat.</li>
+              </ul>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- GLOBAL DYNAMIC ALERT DIALOG -->
+    <div id="global-dialog" class="dialog-overlay">
+      <div class="dialog-box">
+        <h4 class="dialog-title" id="dialog-title">Alert</h4>
+        <p class="dialog-message" id="dialog-message">Message body...</p>
+        <div class="dialog-buttons" id="dialog-buttons">
+          <!-- Button Injection -->
+        </div>
+      </div>
+    </div>
+
+    <!-- GLOBAL TOAST NOTIFICATIONS -->
+    <div class="toast-container">
+      <div id="global-toast" class="toast">
+        <i class="fa-solid fa-circle-info" id="toast-icon"></i>
+        <span id="toast-message">Notification details</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Firebase Scripts (using module loading in app.js) -->
+  <script type="module" src="app.js"></script>
+
+</body>
+</html>

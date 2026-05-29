@@ -1,0 +1,553 @@
+// Chess.js - Self-contained custom chess engine matching Kotlin board logic
+// Includes standard movements, castling, en passant, promotion, checks, draw rules,
+// and the special Predichess 'trap' mechanism.
+
+export const PieceType = {
+  KING: 'KING',
+  QUEEN: 'QUEEN',
+  ROOK: 'ROOK',
+  BISHOP: 'BISHOP',
+  KNIGHT: 'KNIGHT',
+  PAWN: 'PAWN'
+};
+
+export const PieceColor = {
+  WHITE: 'WHITE',
+  BLACK: 'BLACK'
+};
+
+export const GameResult = {
+  ONGOING: 'ONGOING',
+  CHECKMATE_WHITE_WINS: 'CHECKMATE_WHITE_WINS',
+  CHECKMATE_BLACK_WINS: 'CHECKMATE_BLACK_WINS',
+  STALEMATE: 'STALEMATE',
+  DRAW_FIFTY_MOVE: 'DRAW_FIFTY_MOVE',
+  DRAW_THREEFOLD: 'DRAW_THREEFOLD',
+  DRAW_INSUFFICIENT: 'DRAW_INSUFFICIENT'
+};
+
+export class ChessMove {
+  constructor(fromRow, fromCol, toRow, toCol, promotion = null) {
+    this.fromRow = fromRow;
+    this.fromCol = fromCol;
+    this.toRow = toRow;
+    this.toCol = toCol;
+    this.promotion = promotion; // PieceType
+  }
+
+  toUci() {
+    const files = 'abcdefgh';
+    const promoChar = this.promotion ? {
+      [PieceType.QUEEN]: 'q',
+      [PieceType.ROOK]: 'r',
+      [PieceType.BISHOP]: 'b',
+      [PieceType.KNIGHT]: 'n'
+    }[this.promotion] : '';
+    return `${files[this.fromCol]}${8 - this.fromRow}${files[this.toCol]}${8 - this.toRow}${promoChar}`;
+  }
+}
+
+export class ChessBoard {
+  constructor() {
+    this.squares = Array(8).fill(null).map(() => Array(8).fill(null));
+    this.castlingRights = [true, true, true, true]; // [WK, WQ, BK, BQ]
+    this.enPassantTarget = null; // {row, col}
+    this.halfMoveClock = 0;
+    this.currentTurn = PieceColor.WHITE;
+    this.positionHistory = {}; // positionKey -> count
+    this.reset();
+  }
+
+  reset() {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        this.squares[r][c] = null;
+      }
+    }
+
+    const backRow = [
+      PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN,
+      PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK
+    ];
+
+    for (let c = 0; c < 8; c++) {
+      this.squares[0][c] = { type: backRow[c], color: PieceColor.BLACK };
+      this.squares[1][c] = { type: PieceType.PAWN, color: PieceColor.BLACK };
+      this.squares[6][c] = { type: PieceType.PAWN, color: PieceColor.WHITE };
+      this.squares[7][c] = { type: backRow[c], color: PieceColor.WHITE };
+    }
+
+    this.castlingRights = [true, true, true, true];
+    this.enPassantTarget = null;
+    this.halfMoveClock = 0;
+    this.currentTurn = PieceColor.WHITE;
+    this.positionHistory = {};
+    this.positionHistory[this.positionKey()] = 1;
+  }
+
+  applyMoves(events) {
+    this.reset();
+    events.forEach(event => {
+      if (event.startsWith('trap:')) {
+        this.applyTrap(event.substring(5));
+      } else {
+        this.applyMove(event);
+      }
+    });
+  }
+
+  applyMove(uci) {
+    const move = this.parseUci(uci);
+    if (move) {
+      this.applyChessMove(move);
+    }
+  }
+
+  applyTrap(fromSquare) {
+    if (fromSquare.length < 2) return;
+    const col = fromSquare.charCodeAt(0) - 'a'.charCodeAt(0);
+    const row = 8 - parseInt(fromSquare[1], 10);
+    if (row >= 0 && row < 8 && col >= 0 && col < 8) {
+      this.squares[row][col] = null;
+    }
+    this.halfMoveClock = 0;
+    const key = this.positionKey();
+    this.positionHistory[key] = (this.positionHistory[key] || 0) + 1;
+  }
+
+  parseUci(uci) {
+    if (uci.length < 4) return null;
+    const fc = uci.charCodeAt(0) - 'a'.charCodeAt(0);
+    const fr = 8 - parseInt(uci[1], 10);
+    const tc = uci.charCodeAt(2) - 'a'.charCodeAt(0);
+    const tr = 8 - parseInt(uci[3], 10);
+    
+    let promo = null;
+    if (uci.length >= 5) {
+      const char = uci[4].toLowerCase();
+      if (char === 'q') promo = PieceType.QUEEN;
+      else if (char === 'r') promo = PieceType.ROOK;
+      else if (char === 'b') promo = PieceType.BISHOP;
+      else if (char === 'n') promo = PieceType.KNIGHT;
+    }
+    return new ChessMove(fr, fc, tr, tc, promo);
+  }
+
+  applyChessMove(move) {
+    const piece = this.squares[move.fromRow][move.fromCol];
+    if (!piece) return;
+
+    const isCapture = this.squares[move.toRow][move.toCol] !== null;
+    const epTarget = this.enPassantTarget;
+    const isEnPassant = piece.type === PieceType.PAWN && epTarget &&
+                        move.toRow === epTarget.row && move.toCol === epTarget.col;
+    const isCastle = piece.type === PieceType.KING && Math.abs(move.toCol - move.fromCol) === 2;
+
+    if (piece.type === PieceType.PAWN || isCapture || isEnPassant) {
+      this.halfMoveClock = 0;
+    } else {
+      this.halfMoveClock++;
+    }
+
+    if (piece.type === PieceType.PAWN && Math.abs(move.toRow - move.fromRow) === 2) {
+      this.enPassantTarget = {
+        row: Math.floor((move.fromRow + move.toRow) / 2),
+        col: move.fromCol
+      };
+    } else {
+      this.enPassantTarget = null;
+    }
+
+    // Update castling rights
+    if (piece.type === PieceType.KING) {
+      if (piece.color === PieceColor.WHITE) {
+        this.castlingRights[0] = false;
+        this.castlingRights[1] = false;
+      } else {
+        this.castlingRights[2] = false;
+        this.castlingRights[3] = false;
+      }
+    }
+
+    if (piece.type === PieceType.ROOK) {
+      if (move.fromRow === 7 && move.fromCol === 7) this.castlingRights[0] = false;
+      if (move.fromRow === 7 && move.fromCol === 0) this.castlingRights[1] = false;
+      if (move.fromRow === 0 && move.fromCol === 7) this.castlingRights[2] = false;
+      if (move.fromRow === 0 && move.fromCol === 0) this.castlingRights[3] = false;
+    }
+
+    // Castling rook captured
+    if (move.toRow === 7 && move.toCol === 7) this.castlingRights[0] = false;
+    if (move.toRow === 7 && move.toCol === 0) this.castlingRights[1] = false;
+    if (move.toRow === 0 && move.toCol === 7) this.castlingRights[2] = false;
+    if (move.toRow === 0 && move.toCol === 0) this.castlingRights[3] = false;
+
+    // Move the piece (handles promotion)
+    this.squares[move.toRow][move.toCol] = move.promotion ? 
+      { type: move.promotion, color: piece.color } : piece;
+    this.squares[move.fromRow][move.fromCol] = null;
+
+    if (isEnPassant) {
+      const capturedRow = piece.color === PieceColor.WHITE ? move.toRow + 1 : move.toRow - 1;
+      this.squares[capturedRow][move.toCol] = null;
+    }
+
+    if (isCastle) {
+      if (move.toCol === 6) { // Kingside
+        this.squares[move.toRow][5] = this.squares[move.toRow][7];
+        this.squares[move.toRow][7] = null;
+      } else { // Queenside
+        this.squares[move.toRow][3] = this.squares[move.toRow][0];
+        this.squares[move.toRow][0] = null;
+      }
+    }
+
+    this.currentTurn = this.opponent(this.currentTurn);
+    const key = this.positionKey();
+    this.positionHistory[key] = (this.positionHistory[key] || 0) + 1;
+  }
+
+  opponent(color) {
+    return color === PieceColor.WHITE ? PieceColor.BLACK : PieceColor.WHITE;
+  }
+
+  isInCheck(color) {
+    const king = this.findKing(color);
+    if (!king) return false;
+    return this.isAttackedBy(king.row, king.col, this.opponent(color));
+  }
+
+  findKing(color) {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = this.squares[r][c];
+        if (p && p.type === PieceType.KING && p.color === color) {
+          return { row: r, col: c };
+        }
+      }
+    }
+    return null;
+  }
+
+  isAttackedBy(row, col, byColor) {
+    // Knights
+    const knightOffsets = [
+      [-2, -1], [-2, 1], [-1, -2], [-1, 2],
+      [1, -2], [1, 2], [2, -1], [2, 1]
+    ];
+    for (const [dr, dc] of knightOffsets) {
+      const r = row + dr;
+      const c = col + dc;
+      if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+        const p = this.squares[r][c];
+        if (p && p.color === byColor && p.type === PieceType.KNIGHT) return true;
+      }
+    }
+
+    // King
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        const r = row + dr;
+        const c = col + dc;
+        if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+          const p = this.squares[r][c];
+          if (p && p.color === byColor && p.type === PieceType.KING) return true;
+        }
+      }
+    }
+
+    // Pawns
+    const pawnDir = byColor === PieceColor.WHITE ? 1 : -1;
+    for (const dc of [-1, 1]) {
+      const r = row + pawnDir;
+      const c = col + dc;
+      if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+        const p = this.squares[r][c];
+        if (p && p.color === byColor && p.type === PieceType.PAWN) return true;
+      }
+    }
+
+    // Rooks / Queens (Orthogonal)
+    const orthoDirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+    for (const [dr, dc] of orthoDirs) {
+      let r = row + dr;
+      let c = col + dc;
+      while (r >= 0 && r < 8 && c >= 0 && c < 8) {
+        const p = this.squares[r][c];
+        if (p) {
+          if (p.color === byColor && (p.type === PieceType.ROOK || p.type === PieceType.QUEEN)) return true;
+          break;
+        }
+        r += dr;
+        c += dc;
+      }
+    }
+
+    // Bishops / Queens (Diagonal)
+    const diagDirs = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+    for (const [dr, dc] of diagDirs) {
+      let r = row + dr;
+      let c = col + dc;
+      while (r >= 0 && r < 8 && c >= 0 && c < 8) {
+        const p = this.squares[r][c];
+        if (p) {
+          if (p.color === byColor && (p.type === PieceType.BISHOP || p.type === PieceType.QUEEN)) return true;
+          break;
+        }
+        r += dr;
+        c += dc;
+      }
+    }
+
+    return false;
+  }
+
+  legalMovesFrom(row, col) {
+    const piece = this.squares[row][col];
+    if (!piece) return [];
+    return this.pseudoFrom(row, col, piece).filter(move => {
+      const c = this.copy();
+      c.applyChessMove(move);
+      return !c.isInCheck(piece.color);
+    });
+  }
+
+  legalMoves(color) {
+    const moves = [];
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (this.squares[r][c] && this.squares[r][c].color === color) {
+          moves.push(...this.legalMovesFrom(r, c));
+        }
+      }
+    }
+    return moves;
+  }
+
+  pseudoFrom(row, col, piece) {
+    switch (piece.type) {
+      case PieceType.PAWN:
+        return this.pawnMoves(row, col, piece.color);
+      case PieceType.KNIGHT:
+        return this.knightMoves(row, col, piece.color);
+      case PieceType.BISHOP:
+        return this.sliding(row, col, piece.color, [[1, 1], [1, -1], [-1, 1], [-1, -1]]);
+      case PieceType.ROOK:
+        return this.sliding(row, col, piece.color, [[0, 1], [0, -1], [1, 0], [-1, 0]]);
+      case PieceType.QUEEN:
+        return this.sliding(row, col, piece.color, [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]]);
+      case PieceType.KING:
+        return this.kingMoves(row, col, piece.color);
+      default:
+        return [];
+    }
+  }
+
+  pawnMoves(row, col, color) {
+    const moves = [];
+    const dir = color === PieceColor.WHITE ? -1 : 1;
+    const startRow = color === PieceColor.WHITE ? 6 : 1;
+    const promoRow = color === PieceColor.WHITE ? 0 : 7;
+
+    const add = (tr, tc) => {
+      if (tr === promoRow) {
+        for (const p of [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]) {
+          moves.push(new ChessMove(row, col, tr, tc, p));
+        }
+      } else {
+        moves.push(new ChessMove(row, col, tr, tc));
+      }
+    };
+
+    const r1 = row + dir;
+    if (r1 >= 0 && r1 < 8 && this.squares[r1][col] === null) {
+      add(r1, col);
+      if (row === startRow && this.squares[row + 2 * dir][col] === null) {
+        moves.push(new ChessMove(row, col, row + 2 * dir, col));
+      }
+    }
+
+    for (const dc of [-1, 1]) {
+      const c = col + dc;
+      if (r1 >= 0 && r1 < 8 && c >= 0 && c < 8) {
+        const target = this.squares[r1][c];
+        const ep = this.enPassantTarget && this.enPassantTarget.row === r1 && this.enPassantTarget.col === c;
+        if ((target && target.color !== color) || ep) {
+          add(r1, c);
+        }
+      }
+    }
+    return moves;
+  }
+
+  knightMoves(row, col, color) {
+    const moves = [];
+    const offsets = [
+      [-2, -1], [-2, 1], [-1, -2], [-1, 2],
+      [1, -2], [1, 2], [2, -1], [2, 1]
+    ];
+    for (const [dr, dc] of offsets) {
+      const r = row + dr;
+      const c = col + dc;
+      if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+        const p = this.squares[r][c];
+        if (!p || p.color !== color) {
+          moves.push(new ChessMove(row, col, r, c));
+        }
+      }
+    }
+    return moves;
+  }
+
+  sliding(row, col, color, dirs) {
+    const moves = [];
+    for (const [dr, dc] of dirs) {
+      let r = row + dr;
+      let c = col + dc;
+      while (r >= 0 && r < 8 && c >= 0 && c < 8) {
+        const target = this.squares[r][c];
+        if (target === null) {
+          moves.push(new ChessMove(row, col, r, c));
+        } else {
+          if (target.color !== color) {
+            moves.push(new ChessMove(row, col, r, c));
+          }
+          break;
+        }
+        r += dr;
+        c += dc;
+      }
+    }
+    return moves;
+  }
+
+  kingMoves(row, col, color) {
+    const moves = [];
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        const r = row + dr;
+        const c = col + dc;
+        if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+          const p = this.squares[r][c];
+          if (!p || p.color !== color) {
+            moves.push(new ChessMove(row, col, r, c));
+          }
+        }
+      }
+    }
+
+    const rank = color === PieceColor.WHITE ? 7 : 0;
+    const oppColor = this.opponent(color);
+    const ksRight = color === PieceColor.WHITE ? this.castlingRights[0] : this.castlingRights[2];
+    const qsRight = color === PieceColor.WHITE ? this.castlingRights[1] : this.castlingRights[3];
+
+    if (row === rank && col === 4 && !this.isInCheck(color)) {
+      if (ksRight && this.squares[rank][5] === null && this.squares[rank][6] === null &&
+          !this.isAttackedBy(rank, 5, oppColor) && !this.isAttackedBy(rank, 6, oppColor)) {
+        moves.push(new ChessMove(row, col, rank, 6));
+      }
+      if (qsRight && this.squares[rank][3] === null && this.squares[rank][2] === null && this.squares[rank][1] === null &&
+          !this.isAttackedBy(rank, 3, oppColor) && !this.isAttackedBy(rank, 2, oppColor)) {
+        moves.push(new ChessMove(row, col, rank, 2));
+      }
+    }
+    return moves;
+  }
+
+  gameResult() {
+    if (this.findKing(PieceColor.WHITE) === null) return GameResult.CHECKMATE_BLACK_WINS;
+    if (this.findKing(PieceColor.BLACK) === null) return GameResult.CHECKMATE_WHITE_WINS;
+    
+    if (Object.values(this.positionHistory).some(v => v >= 3)) return GameResult.DRAW_THREEFOLD;
+    if (this.halfMoveClock >= 100) return GameResult.DRAW_FIFTY_MOVE;
+    if (this.isInsufficientMaterial()) return GameResult.DRAW_INSUFFICIENT;
+
+    if (this.legalMoves(this.currentTurn).length === 0) {
+      if (this.isInCheck(this.currentTurn)) {
+        return this.currentTurn === PieceColor.WHITE ? 
+          GameResult.CHECKMATE_BLACK_WINS : GameResult.CHECKMATE_WHITE_WINS;
+      } else {
+        return GameResult.STALEMATE;
+      }
+    }
+    return GameResult.ONGOING;
+  }
+
+  isInsufficientMaterial() {
+    const all = [];
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (this.squares[r][c]) all.push(this.squares[r][c]);
+      }
+    }
+
+    if (all.length === 2) return true; // Kings only
+    if (all.length === 3 && all.some(p => p.type === PieceType.KNIGHT || p.type === PieceType.BISHOP)) return true;
+    
+    if (all.length === 4) {
+      const bishops = all.filter(p => p.type === PieceType.BISHOP);
+      if (bishops.length === 2 && bishops[0].color !== bishops[1].color) {
+        const pos = [];
+        for (let r = 0; r < 8; r++) {
+          for (let c = 0; c < 8; c++) {
+            if (this.squares[r][c] && this.squares[r][c].type === PieceType.BISHOP) {
+              pos.push({ r, c });
+            }
+          }
+        }
+        if (pos.length === 2 && (pos[0].r + pos[0].c) % 2 === (pos[1].r + pos[1].c) % 2) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  positionKey() {
+    const sb = [];
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = this.squares[r][c];
+        if (!p) {
+          sb.push('.');
+        } else {
+          const isWhite = p.color === PieceColor.WHITE;
+          const char = {
+            [PieceType.KING]: 'k',
+            [PieceType.QUEEN]: 'q',
+            [PieceType.ROOK]: 'r',
+            [PieceType.BISHOP]: 'b',
+            [PieceType.KNIGHT]: 'n',
+            [PieceType.PAWN]: 'p'
+          }[p.type];
+          sb.push(isWhite ? char.toUpperCase() : char.toLowerCase());
+        }
+      }
+    }
+    sb.push(this.currentTurn === PieceColor.WHITE ? 'w' : 'b');
+    this.castlingRights.forEach(r => sb.push(r ? '1' : '0'));
+    if (this.enPassantTarget) {
+      sb.push(`${this.enPassantTarget.row}${this.enPassantTarget.col}`);
+    } else {
+      sb.push('-');
+    }
+    return sb.join('');
+  }
+
+  copy() {
+    const c = new ChessBoard();
+    for (let r = 0; r < 8; r++) {
+      for (let col = 0; col < 8; col++) {
+        c.squares[r][col] = this.squares[r][col];
+      }
+    }
+    c.castlingRights = [...this.castlingRights];
+    c.enPassantTarget = this.enPassantTarget ? { ...this.enPassantTarget } : null;
+    c.halfMoveClock = this.halfMoveClock;
+    c.currentTurn = this.currentTurn;
+    c.positionHistory = {};
+    return c;
+  }
+}
