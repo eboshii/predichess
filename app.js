@@ -358,10 +358,12 @@ function setupDashboardListeners() {
 
     if (snapshot.empty) {
       pendingHeader.style.display = 'none';
+      requestsList.style.display = 'none';
       return;
     }
 
     pendingHeader.style.display = 'block';
+    requestsList.style.display = 'block';
     snapshot.forEach(docSnap => {
       const fromUid = docSnap.id;
       const data = docSnap.data();
