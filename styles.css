@@ -1197,3 +1197,58 @@ body {
 .help-rule-list strong {
   color: var(--text-primary);
 }
+
+/* OFFLINE BOT PLAY ADDITIONS */
+.bot-banner-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.bot-banner-container:hover {
+  border-color: var(--accent-blue);
+  box-shadow: 0 4px 20px rgba(58, 134, 255, 0.15);
+}
+
+.bot-banner-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bot-banner-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--accent-green);
+  text-shadow: 0 0 10px rgba(0, 245, 212, 0.2);
+}
+
+.bot-banner-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 300;
+}
+
+.bot-game-item {
+  border-left: 3px solid var(--accent-blue) !important;
+}
+
+@media (max-width: 768px) {
+  .bot-banner-container {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  
+  #btn-play-bot {
+    width: 100%;
+  }
+}

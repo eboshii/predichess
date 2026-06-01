@@ -6,7 +6,8 @@ import {
   PieceColor, 
   PieceType, 
   GameResult, 
-  ChessMove 
+  ChessMove,
+  BotEngine
 } from './chess.js';
 
 // --- FIREBASE IMPORT CDN (Modular SDK) ---
@@ -73,6 +74,60 @@ let promotionPendingMove = null;
 let friendRequestsListener = null;
 let openGamesListener = null;
 
+// --- OFFLINE BOT STATE ---
+let botTimeoutId = null;
+let botRunning = false;
+
+const BotGameStore = {
+  PREFS_NAME: "bot_game_prefs",
+
+  save(uid, game) {
+    const data = {
+      events: game.events,
+      predictions: game.predictions,
+      pendingPrediction: game.pendingPrediction,
+      currentTurn: game.currentTurn,
+      phase: game.phase,
+      status: game.status,
+      result: game.result
+    };
+    localStorage.setItem(`${this.PREFS_NAME}_game_${uid}`, JSON.stringify(data));
+  },
+
+  load(uid) {
+    const str = localStorage.getItem(`${this.PREFS_NAME}_game_${uid}`);
+    if (!str) return null;
+    try {
+      const json = JSON.parse(str);
+      return {
+        id: "offline_bot",
+        whiteUid: uid,
+        blackUid: "bot",
+        whiteUsername: "You",
+        blackUsername: "Bot",
+        currentTurn: json.currentTurn,
+        phase: json.phase,
+        events: json.events || [],
+        predictions: json.predictions || [],
+        pendingPrediction: json.pendingPrediction || "",
+        status: json.status || "active",
+        result: json.result || ""
+      };
+    } catch (_) {
+      return null;
+    }
+  },
+
+  clear(uid) {
+    localStorage.removeItem(`${this.PREFS_NAME}_game_${uid}`);
+  },
+
+  hasActiveGame(uid) {
+    const game = this.load(uid);
+    return game && game.status === "active";
+  }
+};
+
 // --- NAVIGATION & SCREEN ROUTING ---
 const screens = {
   login: document.getElementById('screen-login'),
@@ -93,9 +148,16 @@ function showScreen(screenId) {
     }
   });
 
-  if (screenId !== 'game' && gameListener) {
-    gameListener();
-    gameListener = null;
+  if (screenId !== 'game') {
+    if (gameListener) {
+      gameListener();
+      gameListener = null;
+    }
+    if (botTimeoutId) {
+      clearTimeout(botTimeoutId);
+      botTimeoutId = null;
+    }
+    botRunning = false;
     activeGameId = null;
     activeGame = null;
   }
@@ -259,6 +321,11 @@ document.getElementById('btn-dashboard-logout').addEventListener('click', () => 
 document.getElementById('btn-dashboard-help').addEventListener('click', () => showScreen('help'));
 document.getElementById('btn-help-back').addEventListener('click', () => showScreen('dashboard'));
 
+// Play bot listener
+document.getElementById('btn-play-bot').addEventListener('click', () => {
+  enterBotGame();
+});
+
 // --- LOBBY & FRIENDS REALTIME LISTENERS ---
 function setupDashboardListeners() {
   cleanupListeners();
@@ -341,6 +408,32 @@ function setupDashboardListeners() {
     gamesListDiv.innerHTML = '';
     const openGames = currentUser.openGames || [];
     let activeGamesCount = 0;
+
+    // First, check if there's an active local bot game
+    const botGame = BotGameStore.load(currentUid || 'anonymous');
+    const playBotBtn = document.getElementById('btn-play-bot');
+    if (playBotBtn) {
+      playBotBtn.textContent = (botGame && botGame.status === 'active') ? "RESUME BOT GAME" : "PLAY VS OFFLINE BOT";
+    }
+
+    if (botGame && botGame.status === 'active') {
+      activeGamesCount++;
+      const myTurn = botGame.currentTurn === 'white';
+      const item = document.createElement('div');
+      item.className = 'game-item bot-game-item';
+      item.innerHTML = `
+        <div class="game-item-info">
+          <div class="game-item-avatar" style="background-color: var(--accent-blue);">🤖</div>
+          <div>
+            <div class="game-item-opponent">Minimax Bot</div>
+            <div class="game-item-meta">Offline Game</div>
+          </div>
+        </div>
+        <span class="badge ${myTurn ? 'badge-your-turn' : 'badge-waiting'}">${myTurn ? 'YOUR TURN' : "BOT'S TURN"}</span>
+      `;
+      item.addEventListener('click', () => enterBotGame());
+      gamesListDiv.appendChild(item);
+    }
 
     for (const gameId of openGames) {
       const gDoc = await getDoc(doc(db, 'games', gameId));
@@ -560,14 +653,25 @@ function renderGameRoom() {
   if (gameRes !== GameResult.ONGOING && reviewIndex === -1) {
     selSquare = null;
     legalTargets = [];
-    if (activeGame.status === 'active') {
-      finalizeGameOnDB(gameRes);
+    if (activeGameId === 'offline_bot') {
+      if (activeGame.status === 'active') {
+        finalizeLocalBotGame(gameRes);
+      }
+    } else {
+      if (activeGame.status === 'active') {
+        finalizeGameOnDB(gameRes);
+      }
     }
   }
 
   drawChessBoardGrid();
   updateGameHUD(gameRes);
   populateMoveLog();
+
+  // Trigger bot action if it's the bot's turn in a live, active offline game!
+  if (activeGameId === 'offline_bot' && activeGame.currentTurn === 'black' && activeGame.status === 'active' && reviewIndex === -1) {
+    triggerBotAction();
+  }
 }
 
 function drawChessBoardGrid() {
@@ -575,8 +679,10 @@ function drawChessBoardGrid() {
   grid.innerHTML = '';
 
   const inPredictPhase = (activeGame.phase === 'predict');
-  const isMyTurn = (activeGame.currentTurn === 'white' && activeGame.whiteUid === currentUid) ||
-                   (activeGame.currentTurn === 'black' && activeGame.blackUid === currentUid);
+  const isMyTurn = activeGameId === 'offline_bot'
+    ? (activeGame.currentTurn === 'white')
+    : ((activeGame.currentTurn === 'white' && activeGame.whiteUid === currentUid) ||
+       (activeGame.currentTurn === 'black' && activeGame.blackUid === currentUid));
   
   const effectiveFlipped = (reviewIndex === -1 && inPredictPhase && isMyTurn) ? !isFlipped : isFlipped;
 
@@ -823,6 +929,15 @@ async function submitTacticalMove(uci) {
   const myTurnStr = myColor === PieceColor.WHITE ? 'white' : 'black';
   const oppTurnStr = myColor === PieceColor.WHITE ? 'black' : 'white';
 
+  if (activeGameId === 'offline_bot') {
+    if (inPredictPhase) {
+      handleLocalPrediction(uci);
+    } else {
+      handleLocalMove(uci);
+    }
+    return;
+  }
+
   if (inPredictPhase) {
     try {
       await updateDoc(doc(db, 'games', activeGameId), {
@@ -890,8 +1005,10 @@ async function submitTacticalMove(uci) {
 function updateGameHUD(gameRes) {
   const banner = document.getElementById('game-turn-banner');
   const inPredictPhase = (activeGame.phase === 'predict');
-  const isMyTurn = (activeGame.currentTurn === 'white' && activeGame.whiteUid === currentUid) ||
-                   (activeGame.currentTurn === 'black' && activeGame.blackUid === currentUid);
+  const isMyTurn = activeGameId === 'offline_bot'
+    ? (activeGame.currentTurn === 'white')
+    : ((activeGame.currentTurn === 'white' && activeGame.whiteUid === currentUid) ||
+       (activeGame.currentTurn === 'black' && activeGame.blackUid === currentUid));
 
   const btnFirst = document.getElementById('btn-game-first');
   const btnPrev = document.getElementById('btn-game-prev');
@@ -935,9 +1052,9 @@ function updateGameHUD(gameRes) {
     } else {
       banner.style.color = "var(--text-secondary)";
       if (inPredictPhase) {
-        banner.textContent = "OPPONENT PREDICTING";
+        banner.textContent = activeGameId === 'offline_bot' ? "BOT IS PREDICTING..." : "OPPONENT PREDICTING";
       } else {
-        banner.textContent = "WAITING FOR OPPONENT";
+        banner.textContent = activeGameId === 'offline_bot' ? "WAITING FOR BOT" : "WAITING FOR OPPONENT";
       }
     }
   }
@@ -983,8 +1100,10 @@ function populateMoveLog() {
     const predLine = document.createElement('div');
     if (pred) {
       const predictorStr = movingColor === PieceColor.WHITE ? 'Black' : 'White';
-      const isMePredictor = predictorStr.toLowerCase() === (myColor === PieceColor.WHITE ? 'white' : 'black');
-      const predictorLabel = isMePredictor ? 'You' : `Opponent (${predictorStr})`;
+      const isMePredictor = activeGameId === 'offline_bot'
+        ? (predictorStr === 'White')
+        : (predictorStr.toLowerCase() === (myColor === PieceColor.WHITE ? 'white' : 'black'));
+      const predictorLabel = isMePredictor ? 'You' : (activeGameId === 'offline_bot' ? 'Bot' : `Opponent (${predictorStr})`);
 
       if (wasPredicted) {
         predLine.className = 'move-log-prediction destroyed';
@@ -995,8 +1114,10 @@ function populateMoveLog() {
       }
     } else if (i > 0) {
       const predictorStr = movingColor === PieceColor.WHITE ? 'Black' : 'White';
-      const isMePredictor = predictorStr.toLowerCase() === (myColor === PieceColor.WHITE ? 'white' : 'black');
-      const predictorLabel = isMePredictor ? 'You' : `Opponent (${predictorStr})`;
+      const isMePredictor = activeGameId === 'offline_bot'
+        ? (predictorStr === 'White')
+        : (predictorStr.toLowerCase() === (myColor === PieceColor.WHITE ? 'white' : 'black'));
+      const predictorLabel = isMePredictor ? 'You' : (activeGameId === 'offline_bot' ? 'Bot' : `Opponent (${predictorStr})`);
       predLine.className = 'move-log-prediction none';
       predLine.innerHTML = `↳ ${predictorLabel} did not predict a move`;
     }
@@ -1010,8 +1131,10 @@ function populateMoveLog() {
     container.appendChild(row);
   }
 
-  const isMyTurn = (activeGame.currentTurn === 'white' && activeGame.whiteUid === currentUid) ||
-                   (activeGame.currentTurn === 'black' && activeGame.blackUid === currentUid);
+  const isMyTurn = activeGameId === 'offline_bot'
+    ? (activeGame.currentTurn === 'white')
+    : ((activeGame.currentTurn === 'white' && activeGame.whiteUid === currentUid) ||
+       (activeGame.currentTurn === 'black' && activeGame.blackUid === currentUid));
 
   if (!isMyTurn && activeGame.phase === 'move' && activeGame.pendingPrediction) {
     const activeBanner = document.createElement('div');
@@ -1083,6 +1206,18 @@ document.getElementById('btn-game-resign').addEventListener('click', () => {
       text: 'Resign',
       type: 'danger',
       action: async () => {
+        if (activeGameId === 'offline_bot') {
+          const nextGame = {
+            ...activeGame,
+            status: 'completed',
+            result: 'black_wins'
+          };
+          activeGame = nextGame;
+          saveBotGame(nextGame);
+          renderGameRoom();
+          finalizeLocalBotGame(GameResult.CHECKMATE_BLACK_WINS);
+          return;
+        }
         const resignResult = myColor === PieceColor.WHITE ? 'black_wins' : 'white_wins';
         await finalizeGameOnDBDirectly(resignResult);
         showToast('You resigned.', 'info');
@@ -1206,4 +1341,246 @@ function getPieceSvg(type, color) {
     default:
       return "";
   }
+}
+
+// --- LOCAL BOT GAMEPLAY SYSTEM ---
+function enterBotGame() {
+  activeGameId = 'offline_bot';
+  reviewIndex = -1;
+  selSquare = null;
+  legalTargets = [];
+  promotionPendingMove = null;
+
+  showScreen('game');
+
+  const uid = currentUid || 'anonymous';
+  let game = BotGameStore.load(uid);
+
+  if (!game || game.status !== 'active') {
+    // Start a new bot game!
+    game = {
+      id: "offline_bot",
+      whiteUid: uid,
+      blackUid: "bot",
+      whiteUsername: currentUsername || "You",
+      blackUsername: "Bot",
+      currentTurn: "white",
+      phase: "move",
+      events: [],
+      predictions: [],
+      pendingPrediction: "",
+      status: "active",
+      result: ""
+    };
+    BotGameStore.save(uid, game);
+  }
+
+  activeGame = game;
+  myColor = PieceColor.WHITE;
+  isFlipped = false;
+
+  document.getElementById('game-opponent-name').textContent = "Bot";
+  document.getElementById('game-my-name').textContent = currentUsername || "You";
+
+  renderGameRoom();
+}
+
+function saveBotGame(game) {
+  const uid = currentUid || 'anonymous';
+  BotGameStore.save(uid, game);
+}
+
+function handleLocalMove(uci) {
+  if (!activeGame) return;
+  const prediction = activeGame.pendingPrediction || "";
+
+  if (prediction && uci === prediction) {
+    handleLocalTrap(activeGame, uci);
+  } else {
+    const nextGame = {
+      ...activeGame,
+      events: [...activeGame.events, uci],
+      predictions: [...activeGame.predictions, prediction],
+      phase: 'predict',
+      currentTurn: 'white',
+      pendingPrediction: ""
+    };
+    activeGame = nextGame;
+    saveBotGame(nextGame);
+    renderGameRoom();
+  }
+}
+
+function handleLocalPrediction(uci) {
+  if (!activeGame) return;
+  const nextGame = {
+    ...activeGame,
+    pendingPrediction: uci,
+    phase: 'move',
+    currentTurn: 'black'
+  };
+  activeGame = nextGame;
+  saveBotGame(nextGame);
+  renderGameRoom();
+}
+
+function handleLocalTrap(game, moveUci) {
+  const fromSquare = moveUci.substring(0, 2);
+  const fromCol = moveUci.charCodeAt(0) - 'a'.charCodeAt(0);
+  const fromRow = 8 - parseInt(moveUci[1], 10);
+  const piece = activeBoard.squares[fromRow][fromCol];
+  const trapEvent = `trap:${fromSquare}`;
+
+  if (piece && piece.type === PieceType.KING) {
+    const nextGame = {
+      ...game,
+      events: [...game.events, trapEvent],
+      predictions: [...game.predictions, game.pendingPrediction],
+      status: 'completed',
+      result: 'black_wins',
+      pendingPrediction: ""
+    };
+    activeGame = nextGame;
+    saveBotGame(nextGame);
+    renderGameRoom();
+    finalizeLocalBotGame(GameResult.CHECKMATE_BLACK_WINS);
+  } else {
+    const nextGame = {
+      ...game,
+      events: [...game.events, trapEvent],
+      predictions: [...game.predictions, game.pendingPrediction],
+      currentTurn: 'white',
+      phase: 'move',
+      pendingPrediction: ""
+    };
+    activeGame = nextGame;
+    saveBotGame(nextGame);
+    renderGameRoom();
+  }
+}
+
+function triggerBotAction() {
+  if (activeGameId !== 'offline_bot') return;
+  if (!activeGame || activeGame.status !== 'active') return;
+  if (reviewIndex !== -1) return;
+  if (activeGame.currentTurn !== 'black') return;
+  if (botRunning) return;
+
+  botRunning = true;
+  const delayMs = activeGame.phase === 'predict' ? 500 : 1200;
+
+  if (botTimeoutId) clearTimeout(botTimeoutId);
+
+  botTimeoutId = setTimeout(() => {
+    try {
+      const boardCopy = activeBoard.copy();
+
+      if (activeGame.phase === 'predict') {
+        // Bot predicts player's next move using weighted prediction sampler
+        const botPrediction = BotEngine.getWeightedPrediction(boardCopy, PieceColor.WHITE);
+        const nextGame = {
+          ...activeGame,
+          pendingPrediction: botPrediction,
+          phase: 'move',
+          currentTurn: 'white'
+        };
+        activeGame = nextGame;
+        saveBotGame(nextGame);
+        botRunning = false;
+        renderGameRoom();
+      } else if (activeGame.phase === 'move') {
+        // Bot plays its move using minimax with alpha-beta pruning (3 plies deep)
+        const botMove = BotEngine.getBestMove(boardCopy, PieceColor.BLACK, 3);
+        if (botMove) {
+          const uci = botMove.toUci();
+          const prediction = activeGame.pendingPrediction || "";
+
+          if (prediction && uci === prediction) {
+            // Bot fell into the player's trap!
+            const fromSq = uci.substring(0, 2);
+            const fromCol = uci.charCodeAt(0) - 'a'.charCodeAt(0);
+            const fromRow = 8 - parseInt(uci[1], 10);
+            const piece = boardCopy.squares[fromRow][fromCol];
+            const trapEvent = `trap:${fromSq}`;
+
+            if (piece && piece.type === PieceType.KING) {
+              // Bot King is vaporized -> Player wins!
+              const nextGame = {
+                ...activeGame,
+                events: [...activeGame.events, trapEvent],
+                predictions: [...activeGame.predictions, prediction],
+                status: 'completed',
+                result: 'white_wins',
+                pendingPrediction: ""
+              };
+              activeGame = nextGame;
+              saveBotGame(nextGame);
+              botRunning = false;
+              renderGameRoom();
+            } else {
+              // Bot piece is vaporized -> Bot gets a compensation move!
+              const nextGame = {
+                ...activeGame,
+                events: [...activeGame.events, trapEvent],
+                predictions: [...activeGame.predictions, prediction],
+                currentTurn: 'black',
+                phase: 'move',
+                pendingPrediction: ""
+              };
+              activeGame = nextGame;
+              saveBotGame(nextGame);
+              botRunning = false;
+              renderGameRoom();
+            }
+          } else {
+            // Normal bot move completes successfully
+            const nextGame = {
+              ...activeGame,
+              events: [...activeGame.events, uci],
+              predictions: [...activeGame.predictions, prediction],
+              phase: 'predict',
+              currentTurn: 'black',
+              pendingPrediction: ""
+            };
+            activeGame = nextGame;
+            saveBotGame(nextGame);
+            botRunning = false;
+            renderGameRoom();
+          }
+        } else {
+          botRunning = false;
+        }
+      } else {
+        botRunning = false;
+      }
+    } catch (e) {
+      console.error(e);
+      botRunning = false;
+    }
+  }, delayMs);
+}
+
+function finalizeLocalBotGame(result) {
+  const statusStr = (result === GameResult.CHECKMATE_WHITE_WINS) ? 'white_wins' :
+                    (result === GameResult.CHECKMATE_BLACK_WINS) ? 'black_wins' : 'draw';
+  const nextGame = {
+    ...activeGame,
+    status: 'completed',
+    result: statusStr
+  };
+  activeGame = nextGame;
+  saveBotGame(nextGame);
+
+  const userWon = (result === GameResult.CHECKMATE_WHITE_WINS && myColor === PieceColor.WHITE) ||
+                  (result === GameResult.CHECKMATE_BLACK_WINS && myColor === PieceColor.BLACK);
+  const userLost = (result === GameResult.CHECKMATE_WHITE_WINS && myColor === PieceColor.BLACK) ||
+                   (result === GameResult.CHECKMATE_BLACK_WINS && myColor === PieceColor.WHITE);
+  
+  let msg = "The game ended in a draw.";
+  if (userWon) msg = "You win!";
+  if (userLost) msg = "You lose.";
+
+  showDialog('Game Over', msg, [
+    { text: 'OK', type: 'confirm', action: () => showScreen('dashboard') }
+  ]);
 }

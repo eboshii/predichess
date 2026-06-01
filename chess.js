@@ -551,3 +551,203 @@ export class ChessBoard {
     return c;
   }
 }
+
+const PIECE_VALUES = {
+  [PieceType.PAWN]: 100,
+  [PieceType.KNIGHT]: 320,
+  [PieceType.BISHOP]: 330,
+  [PieceType.ROOK]: 500,
+  [PieceType.QUEEN]: 900,
+  [PieceType.KING]: 20000
+};
+
+const PAWN_TABLE = [
+  0,  0,  0,  0,  0,  0,  0,  0,
+  50, 50, 50, 50, 50, 50, 50, 50,
+  10, 10, 20, 30, 30, 20, 10, 10,
+  5,  5, 10, 25, 25, 10,  5,  5,
+  0,  0,  0, 20, 20,  0,  0,  0,
+  5, -5,-10,  0,  0,-10, -5,  5,
+  5, 10, 10,-20,-20, 10, 10,  5,
+  0,  0,  0,  0,  0,  0,  0,  0
+];
+
+const KNIGHT_TABLE = [
+  -50,-40,-30,-30,-30,-30,-40,-50,
+  -40,-20,  0,  0,  0,  0,-20,-40,
+  -30,  0, 10, 15, 15, 10,  0,-30,
+  -30,  5, 15, 20, 20, 15,  5,-30,
+  -30,  0, 15, 20, 20, 15,  0,-30,
+  -30,  5, 10, 15, 15, 10,  5,-30,
+  -40,-20,  0,  5,  5,  0,-20,-40,
+  -50,-40,-30,-30,-30,-30,-40,-50
+];
+
+const BISHOP_TABLE = [
+  -20,-10,-10,-10,-10,-10,-10,-20,
+  -10,  0,  0,  0,  0,  0,  0,-10,
+  -10,  0,  5, 10, 10,  5,  0,-10,
+  -10,  5,  5, 10, 10,  5,  5,-10,
+  -10,  0, 10, 10, 10, 10,  0,-10,
+  -10, 10, 10, 10, 10, 10, 10,-10,
+  -10,  5,  0,  0,  0,  0,  5,-10,
+  -20,-10,-10,-10,-10,-10,-10,-20
+];
+
+const ROOK_TABLE = [
+  0,  0,  0,  0,  0,  0,  0,  0,
+  5, 10, 10, 10, 10, 10, 10,  5,
+ -5,  0,  0,  0,  0,  0,  0, -5,
+ -5,  0,  0,  0,  0,  0,  0, -5,
+ -5,  0,  0,  0,  0,  0,  0, -5,
+ -5,  0,  0,  0,  0,  0,  0, -5,
+ -5,  0,  0,  0,  0,  0,  0, -5,
+  0,  0,  0,  5,  5,  0,  0,  0
+];
+
+export const BotEngine = {
+  evaluateBoard(board) {
+    let score = 0;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const piece = board.squares[r][c];
+        if (!piece) continue;
+        const valBase = PIECE_VALUES[piece.type] || 0;
+        
+        const tableIndex = piece.color === PieceColor.WHITE ? (7 - r) * 8 + c : r * 8 + c;
+        let posBonus = 0;
+        if (piece.type === PieceType.PAWN) posBonus = PAWN_TABLE[tableIndex];
+        else if (piece.type === PieceType.KNIGHT) posBonus = KNIGHT_TABLE[tableIndex];
+        else if (piece.type === PieceType.BISHOP) posBonus = BISHOP_TABLE[tableIndex];
+        else if (piece.type === PieceType.ROOK) posBonus = ROOK_TABLE[tableIndex];
+
+        const totalVal = valBase + posBonus;
+        if (piece.color === PieceColor.WHITE) {
+          score += totalVal;
+        } else {
+          score -= totalVal;
+        }
+      }
+    }
+    return score;
+  },
+
+  minimax(board, depth, alpha, beta, isMaximizing) {
+    const result = board.gameResult();
+    if (result !== GameResult.ONGOING) {
+      if (result === GameResult.CHECKMATE_WHITE_WINS) return [100000 + depth, null];
+      if (result === GameResult.CHECKMATE_BLACK_WINS) return [-100000 - depth, null];
+      return [0, null]; // Draws
+    }
+
+    if (depth === 0) {
+      return [this.evaluateBoard(board), null];
+    }
+
+    const turn = isMaximizing ? PieceColor.WHITE : PieceColor.BLACK;
+    const moves = board.legalMoves(turn);
+
+    if (moves.length === 0) {
+      return [isMaximizing ? -100000 : 100000, null];
+    }
+
+    // Sort moves: simple move ordering (captures first)
+    const orderedMoves = [...moves].sort((mA, mB) => {
+      const targetA = board.squares[mA.toRow][mA.toCol];
+      const targetB = board.squares[mB.toRow][mB.toCol];
+      const valA = targetA ? (PIECE_VALUES[targetA.type] || 0) : 0;
+      const valB = targetB ? (PIECE_VALUES[targetB.type] || 0) : 0;
+      return valB - valA;
+    });
+
+    let bestMove = null;
+    if (isMaximizing) {
+      let maxEval = -Infinity;
+      let currentAlpha = alpha;
+      for (const move of orderedMoves) {
+        const nextBoard = board.copy();
+        nextBoard.applyChessMove(move);
+        const [evalVal] = this.minimax(nextBoard, depth - 1, currentAlpha, beta, false);
+        if (evalVal > maxEval) {
+          maxEval = evalVal;
+          bestMove = move;
+        }
+        currentAlpha = Math.max(currentAlpha, evalVal);
+        if (beta <= currentAlpha) break;
+      }
+      return [maxEval, bestMove];
+    } else {
+      let minEval = Infinity;
+      let currentBeta = beta;
+      for (const move of orderedMoves) {
+        const nextBoard = board.copy();
+        nextBoard.applyChessMove(move);
+        const [evalVal] = this.minimax(nextBoard, depth - 1, alpha, currentBeta, true);
+        if (evalVal < minEval) {
+          minEval = evalVal;
+          bestMove = move;
+        }
+        currentBeta = Math.min(currentBeta, evalVal);
+        if (currentBeta <= alpha) break;
+      }
+      return [minEval, bestMove];
+    }
+  },
+
+  getBestMove(board, color, depth = 3) {
+    const isMaximizing = color === PieceColor.WHITE;
+    const legal = board.legalMoves(color);
+    const searchDepth = legal.length > 25 ? depth - 1 : depth;
+    const [, bestMove] = this.minimax(board, searchDepth, -Infinity, Infinity, isMaximizing);
+    return bestMove;
+  },
+
+  getWeightedPrediction(board, playerColor) {
+    const playerMoves = board.legalMoves(playerColor);
+    if (playerMoves.length === 0) return "";
+
+    const isPlayerWhite = playerColor === PieceColor.WHITE;
+
+    // Pair each move with its evaluation after the player makes it
+    const moveEvaluations = playerMoves.map(move => {
+      const nextBoard = board.copy();
+      nextBoard.applyChessMove(move);
+      const score = this.evaluateBoard(nextBoard);
+      // If player is White, higher score is better for them. If Black, lower score is better.
+      const relativeScore = isPlayerWhite ? score : -score;
+      return { move, score: relativeScore };
+    });
+
+    // Sort by player's best moves first (descending relative score)
+    moveEvaluations.sort((a, b) => b.score - a.score);
+
+    // Take top moves (up to top 5)
+    const numChoices = Math.min(5, moveEvaluations.length);
+    const topChoices = moveEvaluations.slice(0, numChoices);
+
+    // Assign weights. Shift scores to positive
+    const minScore = topChoices[topChoices.length - 1].score;
+    const shiftedScores = topChoices.map(c => ({
+      move: c.move,
+      shifted: Math.max(1, c.score - minScore + 10)
+    }));
+
+    // Square scores to heavily weight towards absolute best choices
+    const weights = shiftedScores.map(s => ({
+      move: s.move,
+      weight: s.shifted * s.shifted
+    }));
+    const totalWeight = weights.reduce((acc, w) => acc + w.weight, 0);
+
+    // Sample based on weights
+    let rand = Math.random() * totalWeight;
+    for (const item of weights) {
+      rand -= item.weight;
+      if (rand <= 0) {
+        return item.move.toUci();
+      }
+    }
+
+    return topChoices[0].move.toUci();
+  }
+};
