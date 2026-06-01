@@ -697,9 +697,57 @@ export const BotEngine = {
   getBestMove(board, color, depth = 3) {
     const isMaximizing = color === PieceColor.WHITE;
     const legal = board.legalMoves(color);
+    if (legal.length === 0) return null;
+    if (legal.length === 1) return legal[0];
+
     const searchDepth = legal.length > 25 ? depth - 1 : depth;
-    const [, bestMove] = this.minimax(board, searchDepth, -Infinity, Infinity, isMaximizing);
-    return bestMove;
+
+    // Evaluate each legal move at searchDepth - 1
+    const moveEvaluations = legal.map(move => {
+      const nextBoard = board.copy();
+      nextBoard.applyChessMove(move);
+      const [evalVal] = this.minimax(nextBoard, searchDepth - 1, -Infinity, Infinity, !isMaximizing);
+      // If color is White, higher score is better. If Black, lower score is better.
+      const relativeScore = isMaximizing ? evalVal : -evalVal;
+      return { move, score: relativeScore };
+    });
+
+    // Sort by best moves first (descending relative score)
+    moveEvaluations.sort((a, b) => b.score - a.score);
+
+    // If the top move is a checkmate / king vaporization (highly forced), play it immediately
+    if (moveEvaluations[0].score >= 90000) {
+      return moveEvaluations[0].move;
+    }
+
+    // Take top choices (up to top 4 moves)
+    const numChoices = Math.min(4, moveEvaluations.length);
+    const topChoices = moveEvaluations.slice(0, numChoices);
+
+    // Shift scores relative to the lowest score in the top choices
+    const minScore = topChoices[topChoices.length - 1].score;
+    const shiftedScores = topChoices.map(c => ({
+      move: c.move,
+      shifted: Math.max(1, c.score - minScore + 15) // +15 buffer ensures top move is favored but alternatives are viable
+    }));
+
+    // Square scores to heavily weight towards absolute best choices
+    const weights = shiftedScores.map(s => ({
+      move: s.move,
+      weight: s.shifted * s.shifted
+    }));
+    const totalWeight = weights.reduce((acc, w) => acc + w.weight, 0);
+
+    // Weighted random sampling
+    let rand = Math.random() * totalWeight;
+    for (const item of weights) {
+      rand -= item.weight;
+      if (rand <= 0) {
+        return item.move;
+      }
+    }
+
+    return topChoices[0].move;
   },
 
   getWeightedPrediction(board, playerColor) {
