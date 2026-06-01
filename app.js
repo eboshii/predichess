@@ -835,7 +835,9 @@ function drawChessBoardGrid() {
           if (reviewIndex !== -1) return;
           e.stopPropagation();
 
-          if (!inPredictPhase && isMyTurn && piece.color === myColor) {
+          if (isLegal) {
+            executeSelectionMove(rowIdx, colIdx);
+          } else if (!inPredictPhase && isMyTurn && piece.color === myColor) {
             selectSquare(rowIdx, colIdx);
           } else if (inPredictPhase && isMyTurn && piece.color !== myColor) {
             selectSquare(rowIdx, colIdx);
