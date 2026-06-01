@@ -567,6 +567,7 @@ body {
   height: 100%;
   padding: 16px;
   gap: 16px;
+  overflow: hidden;
 }
 
 .game-board-container {
@@ -575,15 +576,16 @@ body {
   justify-content: center;
   align-items: center;
   height: 100%;
+  overflow: hidden;
 }
 
 /* Opponent Top Bar aligned with XML layout */
 .opponent-bar-top {
-  width: min(78vh, 78vw);
+  width: min(62vh, 80vw);
   display: flex;
   align-items: center;
-  margin-top: 28px;
-  margin-bottom: 12px;
+  margin-top: 0;
+  margin-bottom: 8px;
 }
 
 .btn-back-text {
@@ -630,13 +632,14 @@ body {
 /* Responsive Square Board Wrapper aligned with CardView */
 .board-wrapper {
   position: relative;
-  width: min(78vh, 78vw);
-  height: min(78vh, 78vw);
+  width: min(62vh, 80vw);
+  height: min(62vh, 80vw);
   background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
 }
 
 .chess-board {
@@ -861,11 +864,11 @@ body {
 
 /* My Info Bar aligned with XML hierarchy */
 .my-info-bar-bottom {
-  width: min(78vh, 78vw);
+  width: min(62vh, 80vw);
   display: flex;
   flex-direction: column;
-  margin-top: 12px;
-  margin-bottom: 12px;
+  margin-top: 8px;
+  margin-bottom: 8px;
   text-align: left;
 }
 
@@ -889,8 +892,8 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  width: min(78vh, 78vw);
-  margin-top: 10px;
+  width: min(62vh, 80vw);
+  margin-top: 8px;
 }
 
 .btn-game-control {
@@ -1229,5 +1232,23 @@ body {
   }
   .bot-play-container button {
     width: 100%;
+  }
+}
+
+@media (max-width: 850px) {
+  .game-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    overflow-y: auto;
+    height: 100%;
+  }
+  
+  .game-board-container {
+    height: auto;
+  }
+  
+  .game-log-panel {
+    height: 300px;
+    margin-top: 16px;
   }
 }
