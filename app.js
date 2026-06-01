@@ -831,19 +831,6 @@ function drawChessBoardGrid() {
 
         pieceEl.innerHTML = getPieceSvg(piece.type, piece.color);
 
-        pieceEl.addEventListener('click', (e) => {
-          if (reviewIndex !== -1) return;
-          e.stopPropagation();
-
-          if (isLegal) {
-            executeSelectionMove(rowIdx, colIdx);
-          } else if (!inPredictPhase && isMyTurn && piece.color === myColor) {
-            selectSquare(rowIdx, colIdx);
-          } else if (inPredictPhase && isMyTurn && piece.color !== myColor) {
-            selectSquare(rowIdx, colIdx);
-          }
-        });
-
         pieceEl.addEventListener('dragstart', (e) => {
           if (reviewIndex !== -1) return;
           e.dataTransfer.setData('text/plain', JSON.stringify({ row: rowIdx, col: colIdx }));
@@ -862,6 +849,16 @@ function drawChessBoardGrid() {
         if (reviewIndex !== -1) return;
         if (isLegal) {
           executeSelectionMove(rowIdx, colIdx);
+        } else if (piece) {
+          if (!inPredictPhase && isMyTurn && piece.color === myColor) {
+            selectSquare(rowIdx, colIdx);
+          } else if (inPredictPhase && isMyTurn && piece.color !== myColor) {
+            selectSquare(rowIdx, colIdx);
+          } else {
+            selSquare = null;
+            legalTargets = [];
+            drawChessBoardGrid();
+          }
         } else {
           selSquare = null;
           legalTargets = [];
