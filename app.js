@@ -227,6 +227,7 @@ onAuthStateChanged(auth, async (user) => {
     currentUsername = "";
     cleanupListeners();
     showScreen('login');
+    updateLoginBotButton();
   }
 });
 
@@ -240,6 +241,19 @@ async function checkUserProfile() {
       currentUsername = currentUser.username;
       
       document.getElementById('user-display-name').textContent = currentUsername;
+
+      // Migrate anonymous bot game if present and user has no active game
+      const anonGame = BotGameStore.load('anonymous');
+      if (anonGame && anonGame.status === 'active') {
+        const userGame = BotGameStore.load(currentUid);
+        if (!userGame || userGame.status !== 'active') {
+          anonGame.whiteUid = currentUid;
+          anonGame.whiteUsername = currentUsername;
+          BotGameStore.save(currentUid, anonGame);
+          BotGameStore.clear('anonymous');
+          showToast('Offline game migrated to your profile!', 'success');
+        }
+      }
 
       setupDashboardListeners();
       showScreen('dashboard');
@@ -307,6 +321,11 @@ document.getElementById('btn-google-login').addEventListener('click', () => {
   signInWithPopup(auth, provider).catch((error) => {
     showToast('Google sign-in failed.', 'error');
   });
+});
+
+// Login screen play bot listener
+document.getElementById('btn-login-play-bot').addEventListener('click', () => {
+  enterBotGame();
 });
 
 // Logout listener
@@ -1230,7 +1249,7 @@ document.getElementById('btn-game-resign').addEventListener('click', () => {
 
 // Exit / Back
 document.getElementById('btn-game-exit').addEventListener('click', () => {
-  showScreen('dashboard');
+  showScreen(currentUid ? 'dashboard' : 'login');
 });
 
 // AUTO FINALIZE GAME IN DATABASE
@@ -1581,6 +1600,14 @@ function finalizeLocalBotGame(result) {
   if (userLost) msg = "You lose.";
 
   showDialog('Game Over', msg, [
-    { text: 'OK', type: 'confirm', action: () => showScreen('dashboard') }
+    { text: 'OK', type: 'confirm', action: () => showScreen(currentUid ? 'dashboard' : 'login') }
   ]);
+}
+
+function updateLoginBotButton() {
+  const btn = document.getElementById('btn-login-play-bot');
+  if (btn) {
+    const hasActive = BotGameStore.hasActiveGame('anonymous');
+    btn.textContent = hasActive ? "RESUME OFFLINE BOT GAME" : "PLAY VS OFFLINE BOT";
+  }
 }
