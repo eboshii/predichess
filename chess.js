@@ -606,6 +606,56 @@ const ROOK_TABLE = [
 ];
 
 export const BotEngine = {
+  isAbsoluteStartingPosition(board) {
+    const backRow = [
+      PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN,
+      PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK
+    ];
+    for (let c = 0; c < 8; c++) {
+      const p = board.squares[0][c];
+      if (!p || p.type !== backRow[c] || p.color !== PieceColor.BLACK) return false;
+      const pawn = board.squares[1][c];
+      if (!pawn || pawn.type !== PieceType.PAWN || pawn.color !== PieceColor.BLACK) return false;
+    }
+    for (let r = 2; r <= 5; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (board.squares[r][c] !== null) return false;
+      }
+    }
+    for (let c = 0; c < 8; c++) {
+      const pawn = board.squares[6][c];
+      if (!pawn || pawn.type !== PieceType.PAWN || pawn.color !== PieceColor.WHITE) return false;
+      const p = board.squares[7][c];
+      if (!p || p.type !== backRow[c] || p.color !== PieceColor.WHITE) return false;
+    }
+    return true;
+  },
+
+  isBlackFirstMove(board) {
+    if (board.currentTurn !== PieceColor.BLACK) return false;
+    const backRow = [
+      PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN,
+      PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK
+    ];
+    for (let c = 0; c < 8; c++) {
+      const p = board.squares[0][c];
+      if (!p || p.type !== backRow[c] || p.color !== PieceColor.BLACK) return false;
+      const pawn = board.squares[1][c];
+      if (!pawn || pawn.type !== PieceType.PAWN || pawn.color !== PieceColor.BLACK) return false;
+    }
+    let whitePiecesInMiddle = 0;
+    for (let r = 2; r <= 5; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = board.squares[r][c];
+        if (p) {
+          if (p.color !== PieceColor.WHITE) return false;
+          whitePiecesInMiddle++;
+        }
+      }
+    }
+    return whitePiecesInMiddle === 1;
+  },
+
   evaluateBoard(board) {
     let score = 0;
     for (let r = 0; r < 8; r++) {
@@ -700,6 +750,92 @@ export const BotEngine = {
     if (legal.length === 0) return null;
     if (legal.length === 1) return legal[0];
 
+    // Check for standard opening book play on move 1
+    if (color === PieceColor.WHITE && this.isAbsoluteStartingPosition(board)) {
+      const whiteOpenings = [
+        { uci: "e2e4", weight: 35 },
+        { uci: "d2d4", weight: 30 },
+        { uci: "c2c4", weight: 10 },
+        { uci: "g1f3", weight: 10 },
+        { uci: "f2f4", weight: 5 },
+        { uci: "b2b3", weight: 4 },
+        { uci: "g2g3", weight: 3 },
+        { uci: "e2e3", weight: 3 }
+      ];
+      const total = whiteOpenings.reduce((acc, o) => acc + o.weight, 0);
+      let r = Math.random() * total;
+      for (const op of whiteOpenings) {
+        r -= op.weight;
+        if (r <= 0) {
+          const move = board.parseUci(op.uci);
+          if (move && legal.some(l => l.fromRow === move.fromRow && l.fromCol === move.fromCol && l.toRow === move.toRow && l.toCol === move.toCol)) {
+            return move;
+          }
+        }
+      }
+    }
+
+    if (color === PieceColor.BLACK && this.isBlackFirstMove(board)) {
+      // Find what White played
+      let whiteMoveUci = "";
+      for (let r = 2; r <= 5; r++) {
+        for (let c = 0; c < 8; c++) {
+          if (board.squares[r][c] && board.squares[r][c].color === PieceColor.WHITE) {
+            const files = 'abcdefgh';
+            whiteMoveUci = `${files[c]}${8 - r}`;
+          }
+        }
+      }
+
+      let replies = [];
+      if (whiteMoveUci === "e4") {
+        replies = [
+          { uci: "c7c5", weight: 35 },
+          { uci: "e7e5", weight: 30 },
+          { uci: "e7e6", weight: 15 },
+          { uci: "c7c6", weight: 10 },
+          { uci: "d7d5", weight: 4 },
+          { uci: "d7d6", weight: 3 },
+          { uci: "g7g6", weight: 2 },
+          { uci: "b8c6", weight: 1 }
+        ];
+      } else if (whiteMoveUci === "d4") {
+        replies = [
+          { uci: "d7d5", weight: 40 },
+          { uci: "g8f6", weight: 35 },
+          { uci: "e7e6", weight: 10 },
+          { uci: "c7c5", weight: 5 },
+          { uci: "f7f5", weight: 4 },
+          { uci: "g7g6", weight: 3 },
+          { uci: "d7d6", weight: 2 },
+          { uci: "c7c6", weight: 1 }
+        ];
+      } else {
+        replies = [
+          { uci: "d7d5", weight: 30 },
+          { uci: "g8f6", weight: 30 },
+          { uci: "e7e5", weight: 20 },
+          { uci: "c7c5", weight: 10 },
+          { uci: "e7e6", weight: 4 },
+          { uci: "g7g6", weight: 3 },
+          { uci: "c7c6", weight: 2 },
+          { uci: "d7d6", weight: 1 }
+        ];
+      }
+
+      const total = replies.reduce((acc, o) => acc + o.weight, 0);
+      let r = Math.random() * total;
+      for (const op of replies) {
+        r -= op.weight;
+        if (r <= 0) {
+          const move = board.parseUci(op.uci);
+          if (move && legal.some(l => l.fromRow === move.fromRow && l.fromCol === move.fromCol && l.toRow === move.toRow && l.toCol === move.toCol)) {
+            return move;
+          }
+        }
+      }
+    }
+
     const searchDepth = legal.length > 25 ? depth - 1 : depth;
 
     // Evaluate each legal move at searchDepth - 1
@@ -720,20 +856,22 @@ export const BotEngine = {
       return moveEvaluations[0].move;
     }
 
-    // Take top choices (up to top 7 moves)
-    const numChoices = Math.min(7, moveEvaluations.length);
+    // Take top choices (up to top 4 moves)
+    const numChoices = Math.min(4, moveEvaluations.length);
     const topChoices = moveEvaluations.slice(0, numChoices);
 
-    // Compute Boltzmann (Softmax) weights based on score difference from the best choice
-    // Temperature is 40.0 centipawns. Ensures that moves that are close in score
-    // have nearly equal chance, while blunders/suboptimal moves scale down exponentially.
-    const bestScore = topChoices[0].score;
-    const weights = topChoices.map(c => {
-      const diff = bestScore - c.score; // diff >= 0
-      const weight = Math.exp(-diff / 40.0);
-      return { move: c.move, weight };
-    });
+    // Shift scores relative to the lowest score in the top choices
+    const minScore = topChoices[topChoices.length - 1].score;
+    const shiftedScores = topChoices.map(c => ({
+      move: c.move,
+      shifted: Math.max(1, c.score - minScore + 15) // +15 buffer ensures top move is favored but alternatives are viable
+    }));
 
+    // Square scores to heavily weight towards absolute best choices
+    const weights = shiftedScores.map(s => ({
+      move: s.move,
+      weight: s.shifted * s.shifted
+    }));
     const totalWeight = weights.reduce((acc, w) => acc + w.weight, 0);
 
     // Weighted random sampling
