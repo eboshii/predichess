@@ -720,22 +720,20 @@ export const BotEngine = {
       return moveEvaluations[0].move;
     }
 
-    // Take top choices (up to top 4 moves)
-    const numChoices = Math.min(4, moveEvaluations.length);
+    // Take top choices (up to top 7 moves)
+    const numChoices = Math.min(7, moveEvaluations.length);
     const topChoices = moveEvaluations.slice(0, numChoices);
 
-    // Shift scores relative to the lowest score in the top choices
-    const minScore = topChoices[topChoices.length - 1].score;
-    const shiftedScores = topChoices.map(c => ({
-      move: c.move,
-      shifted: Math.max(1, c.score - minScore + 15) // +15 buffer ensures top move is favored but alternatives are viable
-    }));
+    // Compute Boltzmann (Softmax) weights based on score difference from the best choice
+    // Temperature is 40.0 centipawns. Ensures that moves that are close in score
+    // have nearly equal chance, while blunders/suboptimal moves scale down exponentially.
+    const bestScore = topChoices[0].score;
+    const weights = topChoices.map(c => {
+      const diff = bestScore - c.score; // diff >= 0
+      const weight = Math.exp(-diff / 40.0);
+      return { move: c.move, weight };
+    });
 
-    // Square scores to heavily weight towards absolute best choices
-    const weights = shiftedScores.map(s => ({
-      move: s.move,
-      weight: s.shifted * s.shifted
-    }));
     const totalWeight = weights.reduce((acc, w) => acc + w.weight, 0);
 
     // Weighted random sampling
