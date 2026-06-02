@@ -2278,6 +2278,7 @@ function setupPublicLobbyListener() {
     if (hostBtn) {
       const hasOpenChallenge = challenges.some(c => c.hostUid === currentUid);
       hostBtn.disabled = hasOpenChallenge;
+      hostBtn.textContent = hasOpenChallenge ? 'CHALLENGE OPEN' : 'HOST PUBLIC CHALLENGE';
     }
 
     if (challenges.length === 0) {
