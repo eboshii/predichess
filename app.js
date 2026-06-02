@@ -236,6 +236,10 @@ function showScreen(screenId) {
     activeGameId = null;
     activeGame = null;
   }
+
+  if (screenId === 'dashboard') {
+    refreshOpenGamesList();
+  }
 }
 
 // --- DYNAMIC ALERT DIALOGS & TOASTS ---
