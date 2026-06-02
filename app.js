@@ -314,8 +314,10 @@ document.getElementById('btn-submit-username').addEventListener('click', async (
   const errorDiv = document.getElementById('username-error');
 
   if (!username) return;
-  if (username.length < 3 || username.length > 20) {
-    errorDiv.textContent = "Username must be between 3 and 20 characters.";
+  
+  const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+  if (!usernameRegex.test(username)) {
+    errorDiv.textContent = "Username must be 3-20 characters and contain only letters, numbers, underscores, or hyphens.";
     errorDiv.style.display = "block";
     return;
   }
