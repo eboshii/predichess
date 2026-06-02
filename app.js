@@ -98,6 +98,7 @@ let promotionPendingMove = null;
 
 let friendRequestsListener = null;
 let openGamesListener = null;
+let dashboardPollInterval = null;
 
 // --- SOUND NOTIFICATION AND EVENT TRACKERS ---
 let renderedEventsCount = -1;
@@ -544,40 +545,53 @@ function setupDashboardListeners() {
       }
     }
 
-    // Render Active Games List (OPEN GAMES)
-    const gamesListDiv = document.getElementById('open-games-list');
-    gamesListDiv.innerHTML = '';
-    const openGames = currentUser.openGames || [];
-    let activeGamesCount = 0;
+    await refreshOpenGamesList();
+  });
 
-    // First, check if there's an active local bot game
-    const hasActiveBot = BotGameStore.hasActiveGame(currentUid || 'anonymous');
-    const botGame = hasActiveBot ? BotGameStore.load(currentUid || 'anonymous') : null;
-    const playBotBtn = document.getElementById('btn-play-bot');
-    if (playBotBtn) {
-      playBotBtn.textContent = hasActiveBot ? "RESUME BOT GAME" : "PLAY VS OFFLINE BOT";
-    }
+  if (dashboardPollInterval) clearInterval(dashboardPollInterval);
+  dashboardPollInterval = setInterval(refreshOpenGamesList, 15000);
 
-    if (hasActiveBot && botGame) {
-      activeGamesCount++;
-      const myTurn = botGame.currentTurn === 'white';
-      const item = document.createElement('div');
-      item.className = 'game-item bot-game-item';
-      item.innerHTML = `
-        <div class="game-item-info">
-          <div class="game-item-avatar" style="background-color: var(--accent-blue);">🤖</div>
-          <div>
-            <div class="game-item-opponent">Minimax Bot</div>
-            <div class="game-item-meta">Offline Game</div>
-          </div>
+  setupPublicLobbyListener();
+}
+
+async function refreshOpenGamesList() {
+  if (!currentUser) return;
+  const gamesListDiv = document.getElementById('open-games-list');
+  if (!gamesListDiv) return;
+
+  const uid = currentUid || 'anonymous';
+  const openGames = currentUser.openGames || [];
+  let activeGamesCount = 0;
+  const items = [];
+
+  const hasActiveBot = BotGameStore.hasActiveGame(uid);
+  const botGame = hasActiveBot ? BotGameStore.load(uid) : null;
+  const playBotBtn = document.getElementById('btn-play-bot');
+  if (playBotBtn) {
+    playBotBtn.textContent = hasActiveBot ? "RESUME BOT GAME" : "PLAY VS OFFLINE BOT";
+  }
+
+  if (hasActiveBot && botGame) {
+    activeGamesCount++;
+    const myTurn = botGame.currentTurn === 'white';
+    const item = document.createElement('div');
+    item.className = 'game-item bot-game-item';
+    item.innerHTML = `
+      <div class="game-item-info">
+        <div class="game-item-avatar" style="background-color: var(--accent-blue);">🤖</div>
+        <div>
+          <div class="game-item-opponent">Minimax Bot</div>
+          <div class="game-item-meta">Offline Game</div>
         </div>
-        <span class="badge ${myTurn ? 'badge-your-turn' : 'badge-waiting'}">${myTurn ? 'YOUR TURN' : "BOT'S TURN"}</span>
-      `;
-      item.addEventListener('click', () => enterBotGame());
-      gamesListDiv.appendChild(item);
-    }
+      </div>
+      <span class="badge ${myTurn ? 'badge-your-turn' : 'badge-waiting'}">${myTurn ? 'YOUR TURN' : "BOT'S TURN"}</span>
+    `;
+    item.addEventListener('click', () => enterBotGame());
+    items.push(item);
+  }
 
-    for (const gameId of openGames) {
+  for (const gameId of openGames) {
+    try {
       const gDoc = await getDoc(doc(db, 'games', gameId));
       if (gDoc.exists()) {
         const gData = gDoc.data();
@@ -586,7 +600,6 @@ function setupDashboardListeners() {
           const opponentName = gData.whiteUid === currentUid ? gData.blackUsername : gData.whiteUsername;
           const myTurn = (gData.currentTurn === 'white' && gData.whiteUid === currentUid) ||
                          (gData.currentTurn === 'black' && gData.blackUid === currentUid);
-
           const item = document.createElement('div');
           item.className = 'game-item';
           item.innerHTML = `
@@ -600,30 +613,29 @@ function setupDashboardListeners() {
             <span class="badge ${myTurn ? 'badge-your-turn' : 'badge-waiting'}">${myTurn ? 'YOUR TURN' : 'WAITING'}</span>
           `;
           item.addEventListener('click', () => enterGame(gameId));
-          gamesListDiv.appendChild(item);
+          items.push(item);
         }
       }
-    }
+    } catch (_) {}
+  }
 
-    if (activeGamesCount === 0) {
-      gamesListDiv.innerHTML = `
-        <div class="empty-state">
-          <p>No active games</p>
-        </div>
-      `;
-    }
-  });
+  gamesListDiv.innerHTML = '';
+  items.forEach(item => gamesListDiv.appendChild(item));
 
-  setupPublicLobbyListener();
+  if (activeGamesCount === 0) {
+    gamesListDiv.innerHTML = `<div class="empty-state"><p>No active games</p></div>`;
+  }
 }
 
 function cleanupListeners() {
   if (friendRequestsListener) friendRequestsListener();
   if (openGamesListener) openGamesListener();
   if (publicChallengesListener) publicChallengesListener();
+  if (dashboardPollInterval) clearInterval(dashboardPollInterval);
   friendRequestsListener = null;
   openGamesListener = null;
   publicChallengesListener = null;
+  dashboardPollInterval = null;
 }
 
 // TAB MANAGEMENT IN DASHBOARD
