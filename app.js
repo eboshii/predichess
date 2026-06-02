@@ -760,7 +760,7 @@ function renderGameRoom() {
   if (!activeGame) return;
 
   const events = activeGame.events || [];
-  const eventsToApply = reviewIndex === -1 ? events : events.slice(0, reviewIndex + 1);
+  const eventsToApply = reviewIndex === -1 ? events : (reviewIndex === -2 ? [] : events.slice(0, reviewIndex + 1));
   activeBoard.applyMoves(eventsToApply);
 
   const gameRes = activeBoard.gameResult();
@@ -813,7 +813,7 @@ function drawChessBoardGrid() {
   let trapSq = null;
 
   const events = activeGame.events || [];
-  const eventsToApply = reviewIndex === -1 ? events : events.slice(0, reviewIndex + 1);
+  const eventsToApply = reviewIndex === -1 ? events : (reviewIndex === -2 ? [] : events.slice(0, reviewIndex + 1));
 
   if (eventsToApply.length > 0) {
     const lastEvent = eventsToApply[eventsToApply.length - 1];
@@ -1158,12 +1158,19 @@ function updateGameHUD(gameRes) {
   if (reviewIndex !== -1) {
     // Reviewing banner
     banner.style.color = "var(--accent-blue)";
-    banner.textContent = `REVIEWING MOVE ${reviewIndex + 1}/${eventsSize}`;
-
-    btnFirst.disabled = (reviewIndex === 0);
-    btnPrev.disabled = (reviewIndex === 0);
-    btnNext.disabled = false;
-    btnLast.disabled = false;
+    if (reviewIndex === -2) {
+      banner.textContent = `REVIEWING: STARTING POSITION (MOVE 0/${eventsSize})`;
+      btnFirst.disabled = true;
+      btnPrev.disabled = true;
+      btnNext.disabled = (eventsSize === 0);
+      btnLast.disabled = false;
+    } else {
+      banner.textContent = `REVIEWING MOVE ${reviewIndex + 1}/${eventsSize}`;
+      btnFirst.disabled = false;
+      btnPrev.disabled = false;
+      btnNext.disabled = false;
+      btnLast.disabled = false;
+    }
   } else {
     // Live banner
     btnFirst.disabled = (eventsSize === 0);
@@ -1311,7 +1318,7 @@ function formatUciMove(move) {
 document.getElementById('btn-game-first').addEventListener('click', () => {
   const events = activeGame.events || [];
   if (events.length > 0) {
-    reviewIndex = 0;
+    reviewIndex = -2; // Jump back to starting position (Move 0)
     renderGameRoom();
   }
 });
@@ -1321,8 +1328,10 @@ document.getElementById('btn-game-prev').addEventListener('click', () => {
   if (events.length > 0) {
     if (reviewIndex === -1) {
       reviewIndex = events.length - 1;
+    } else if (reviewIndex === 0) {
+      reviewIndex = -2; // From move 1 go back to move 0 starting board state
     } else {
-      reviewIndex = Math.max(0, reviewIndex - 1);
+      reviewIndex = Math.max(-2, reviewIndex - 1);
     }
     renderGameRoom();
   }
@@ -1331,7 +1340,9 @@ document.getElementById('btn-game-prev').addEventListener('click', () => {
 document.getElementById('btn-game-next').addEventListener('click', () => {
   const events = activeGame.events || [];
   if (events.length > 0 && reviewIndex !== -1) {
-    if (reviewIndex === events.length - 1) {
+    if (reviewIndex === -2) {
+      reviewIndex = 0; // From move 0 advance to move 1
+    } else if (reviewIndex === events.length - 1) {
       reviewIndex = -1;
     } else {
       reviewIndex++;
