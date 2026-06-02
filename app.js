@@ -850,13 +850,7 @@ function renderGameRoom() {
           // 3. Vaporize/Explode 0.5 seconds later
           setTimeout(() => {
             if (activeGame && activeGame.events && activeGame.events.length - 1 === trapIdx && reviewIndex === -1) {
-              // Apply the actual board containing the trap removal
-              activeBoard.applyMoves(events);
-
-              // Redraw board (naturally triggers the explosion shockwave!)
-              drawChessBoardGrid();
-              updateGameHUD(activeBoard.gameResult());
-              populateMoveLog();
+              renderGameRoom();
             }
           }, 500);
 
