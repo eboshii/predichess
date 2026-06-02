@@ -20,22 +20,23 @@ import {
   onAuthStateChanged 
 } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
 import { 
-  getFirestore, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc, 
-  arrayUnion, 
-  arrayRemove, 
-  addDoc, 
-  runTransaction, 
-  collection, 
-  onSnapshot, 
-  query, 
-  where, 
-  getDocs, 
-  writeBatch, 
-  serverTimestamp 
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
+  addDoc,
+  deleteDoc,
+  runTransaction,
+  collection,
+  onSnapshot,
+  query,
+  where,
+  getDocs,
+  writeBatch,
+  serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 
 // --- FIREBASE CONFIGURATION ---
@@ -2173,15 +2174,19 @@ async function handleTimeoutLoss(losingColor) {
 async function hostPublicChallenge(timerType) {
   const uid = currentUid;
   if (!uid) return;
-  showToast('Hosting challenge...', 'info');
   try {
-    const challengeData = {
+    const existing = await getDocs(query(collection(db, 'open_challenges'), where('hostUid', '==', uid)));
+    if (!existing.empty) {
+      showToast('Cancel your existing challenge first.', 'error');
+      return;
+    }
+    showToast('Hosting challenge...', 'info');
+    await addDoc(collection(db, 'open_challenges'), {
       hostUid: uid,
       hostUsername: currentUsername || 'Anonymous',
       timerType: timerType,
       createdAt: Date.now()
-    };
-    await addDoc(collection(db, 'open_challenges'), challengeData);
+    });
     showToast('Challenge posted to lobby!', 'success');
   } catch (e) {
     showToast('Failed to host challenge.', 'error');
@@ -2268,6 +2273,12 @@ function setupPublicLobbyListener() {
     });
 
     challenges.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    const hostBtn = document.getElementById('btn-host-challenge');
+    if (hostBtn) {
+      const hasOpenChallenge = challenges.some(c => c.hostUid === currentUid);
+      hostBtn.disabled = hasOpenChallenge;
+    }
 
     if (challenges.length === 0) {
       listEl.innerHTML = `
