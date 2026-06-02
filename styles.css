@@ -1240,14 +1240,22 @@ body {
 }
 
 @media (max-width: 850px) {
+  /* Prevent vertical centering of overflows, avoiding top-of-screen clipping */
+  .screen.active {
+    align-items: flex-start !important;
+    justify-content: center !important;
+  }
+
   /* Core layout fit for mobile (behaves like native Android App) */
   .game-layout {
     display: flex;
     flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
     width: 100%;
     height: 100%;
-    padding: 12px;
-    gap: 8px;
+    padding: 8px 12px;
+    gap: 4px;
     overflow: hidden;
   }
   
@@ -1259,6 +1267,7 @@ body {
     height: auto;
     width: 100%;
     flex-shrink: 0;
+    margin: 0 auto;
   }
   
   /* Board and bars sized perfectly to fit inside mobile viewports without vertical overflow */
@@ -1266,11 +1275,30 @@ body {
   .board-wrapper, 
   .my-info-bar-bottom, 
   .navigation-controls-row {
-    width: min(92vw, 44vh) !important;
+    width: min(90vw, 38vh) !important;
+    box-sizing: border-box;
   }
   
   .board-wrapper {
-    height: min(92vw, 44vh) !important;
+    height: min(90vw, 38vh) !important;
+  }
+
+  /* Truncate long opponent names to prevent pushing elements off screen */
+  .opponent-text-name {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    min-width: 0 !important;
+    flex: 1 !important;
+    margin-right: 8px !important;
+  }
+
+  .my-name-display {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    min-width: 0 !important;
+    flex: 1 !important;
   }
   
   /* Make the Move Log panel act like a flex child that fills the remaining viewport height */
@@ -1297,29 +1325,42 @@ body {
   }
   
   .tab-button {
-    padding: 12px 0;
-    font-size: 12px;
+    padding: 10px 0 !important;
+    font-size: 11px !important;
+    letter-spacing: 0.05em !important;
   }
   
   .card-panel {
     padding: 12px;
   }
   
+  /* Stack bot difficulty and public challenge options vertically */
   .bot-play-container {
-    flex-direction: column;
-    gap: 10px;
-    padding: 16px 0;
-    margin-bottom: 20px;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    padding: 16px 0 !important;
+    margin-bottom: 16px !important;
+    border-bottom: 1.5px solid var(--border-color);
   }
   
   .bot-play-container button {
-    width: 100%;
+    width: 100% !important;
+    max-width: 100% !important;
     margin: 0 !important;
-    padding: 12px 24px;
+    padding: 12px 24px !important;
+    box-sizing: border-box !important;
   }
   
   .auth-container {
     padding: 0 20px;
+    width: 100%;
+  }
+
+  .auth-container button {
+    width: 100% !important;
+    max-width: 280px !important;
+    box-sizing: border-box !important;
   }
   
   .login-title {
@@ -1329,6 +1370,75 @@ body {
   
   .help-card {
     padding: 16px;
+  }
+
+  /* Help Panel layout overrides */
+  #screen-help .dashboard-content {
+    padding: 24px 16px !important;
+  }
+  .help-heading {
+    font-size: 14px !important;
+  }
+  .help-text, .help-rule-list {
+    font-size: 12px !important;
+  }
+
+  /* Stack Search bar vertically on mobile */
+  .friend-search-container {
+    flex-direction: column !important;
+    gap: 8px !important;
+    margin-bottom: 16px !important;
+  }
+  .friend-add-input {
+    width: 100% !important;
+  }
+  .btn-outlined-blue-small {
+    width: 100% !important;
+    padding: 10px !important;
+    text-align: center !important;
+  }
+
+  /* Stack friend items vertically to prevent username name clipping */
+  .friend-item, .request-item {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    padding: 12px 0 !important;
+  }
+  .friend-actions, .request-actions {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: flex-end !important;
+    gap: 8px !important;
+  }
+  .friend-info {
+    width: 100% !important;
+  }
+  .friend-name {
+    font-size: 14px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: block !important;
+  }
+
+  /* Truncate opponent in open games card list */
+  .game-item-opponent {
+    max-width: 140px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* Secure alert dialog buttons from overflowing */
+  .dialog-buttons {
+    flex-wrap: wrap !important;
+    justify-content: flex-end !important;
+    gap: 8px !important;
+  }
+  .btn-dialog {
+    padding: 8px 12px !important;
+    font-size: 12px !important;
   }
 }
 
