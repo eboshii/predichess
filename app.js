@@ -53,6 +53,30 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// --- SOUND MANAGER FOR CHESS EVENTS ---
+const SoundManager = {
+  sounds: {
+    move: './sounds/move.mp3',
+    capture: './sounds/capture.mp3',
+    explosion: './sounds/explosion.mp3',
+    genericnotify: './sounds/genericnotify.mp3',
+    lowtime: './sounds/lowtime.mp3'
+  },
+
+  playSound(name, pitch = 1.0) {
+    try {
+      const src = this.sounds[name];
+      if (!src) return;
+      const audio = new Audio(src);
+      audio.preservesPitch = false;
+      audio.playbackRate = pitch;
+      audio.play().catch(e => console.log("Sound play blocked by browser autoplay policy:", e));
+    } catch (e) {
+      console.error("Error playing sound", e);
+    }
+  }
+};
+
 // --- GLOBAL STATE ---
 let currentUser = null;
 let currentUid = null;
@@ -73,6 +97,13 @@ let promotionPendingMove = null;
 
 let friendRequestsListener = null;
 let openGamesListener = null;
+
+// --- SOUND NOTIFICATION AND EVENT TRACKERS ---
+let renderedEventsCount = -1;
+let lastPlayedLowTimeSecond = -1;
+let previousTurn = "";
+let previousPhase = "";
+let lastAnimatedTrapIndex = -1;
 
 // --- OFFLINE BOT STATE ---
 let botTimeoutId = null;
@@ -744,6 +775,13 @@ function enterGame(gameId) {
   legalTargets = [];
   promotionPendingMove = null;
 
+  // Reset sound and clock state variables
+  renderedEventsCount = -1;
+  lastPlayedLowTimeSecond = -1;
+  previousTurn = "";
+  previousPhase = "";
+  lastAnimatedTrapIndex = -1;
+
   showScreen('game');
 
   gameListener = onSnapshot(doc(db, 'games', gameId), (docSnap) => {
@@ -762,6 +800,131 @@ function renderGameRoom() {
   if (!activeGame) return;
 
   const events = activeGame.events || [];
+
+  // --- Real-time Trap Vaporization Delay (Live Gameplay Only) ---
+  // If a trap is hit, we show the piece moving for 0.5s, then trigger the vaporization/explosion.
+  if (reviewIndex === -1 && events.length > 0) {
+    const lastEvent = events[events.length - 1];
+    const trapIdx = events.length - 1;
+    if (lastEvent.startsWith('trap:') && lastAnimatedTrapIndex !== trapIdx) {
+      const pred = activeGame.predictions ? activeGame.predictions[activeGame.predictions.length - 1] : "";
+      if (pred && pred.length >= 4) {
+        const fromSq = pred.substring(0, 2);
+        const toSq = pred.substring(2, 4);
+        const fromCol = fromSq.charCodeAt(0) - 'a'.charCodeAt(0);
+        const fromRow = 8 - parseInt(fromSq[1], 10);
+        const toCol = toSq.charCodeAt(0) - 'a'.charCodeAt(0);
+        const toRow = 8 - parseInt(toSq[1], 10);
+
+        const prevEvents = events.slice(0, -1);
+        const tempBoard = new ChessBoard();
+        tempBoard.applyMoves(prevEvents);
+        const piece = tempBoard.squares[fromRow][fromCol];
+
+        if (piece) {
+          // 1. Show the board right before the vaporization
+          activeBoard.applyMoves(prevEvents);
+
+          // 2. Visually place the piece at the destination momentarily
+          activeBoard.squares[fromRow][fromCol] = null;
+          activeBoard.squares[toRow][toCol] = piece;
+
+          // Clear check visually during move
+          activeBoard.checkSquare = null;
+
+          // Set tracking variable to prevent animation re-triggers
+          lastAnimatedTrapIndex = trapIdx;
+
+          // Render this intermediate state
+          drawChessBoardGrid();
+          updateGameHUD(activeBoard.gameResult());
+          populateMoveLog();
+
+          // 3. Vaporize/Explode 0.5 seconds later
+          setTimeout(() => {
+            if (activeGame && activeGame.events && activeGame.events.length - 1 === trapIdx && reviewIndex === -1) {
+              // Apply the actual board containing the trap removal
+              activeBoard.applyMoves(events);
+
+              // Redraw board (naturally triggers the explosion shockwave!)
+              drawChessBoardGrid();
+              updateGameHUD(activeBoard.gameResult());
+              populateMoveLog();
+            }
+          }, 500);
+
+          // Bypasses synchronous render for this frame
+          return;
+        }
+      }
+    }
+  }
+
+  // --- Real-time Sounds for Newly Added Live Events ---
+  if (reviewIndex === -1) {
+    if (renderedEventsCount === -1) {
+      renderedEventsCount = events.length;
+    } else if (events.length > renderedEventsCount) {
+      const tempBoard = new ChessBoard();
+      const existingEvents = events.slice(0, renderedEventsCount);
+      tempBoard.applyMoves(existingEvents);
+
+      for (let i = renderedEventsCount; i < events.length; i++) {
+        const event = events[i];
+        if (event.startsWith('trap:')) {
+          SoundManager.playSound('explosion');
+        } else {
+          // Parse UCI details
+          const fromSq = event.substring(0, 2);
+          const toSq = event.substring(2, 4);
+          const toCol = toSq.charCodeAt(0) - 'a'.charCodeAt(0);
+          const toRow = 8 - parseInt(toSq[1], 10);
+          const fromCol = fromSq.charCodeAt(0) - 'a'.charCodeAt(0);
+          const fromRow = 8 - parseInt(fromSq[1], 10);
+          const piece = tempBoard.squares[fromRow][fromCol];
+          const targetPiece = tempBoard.squares[toRow][toCol];
+          
+          const isCapture = (targetPiece !== null) || (tempBoard.enPassantTarget === toSq && piece && piece.type === PieceType.PAWN);
+
+          tempBoard.applyMove(event);
+
+          const opponentColor = piece && piece.color === PieceColor.WHITE ? PieceColor.BLACK : PieceColor.WHITE;
+          const isCheck = tempBoard.isInCheck(opponentColor);
+
+          const isOpponentMove = piece && (piece.color !== myColor);
+          const pitch = isOpponentMove ? 1.15 : 1.0;
+
+          if (isCheck) {
+            SoundManager.playSound('genericnotify', pitch);
+          } else if (isCapture) {
+            SoundManager.playSound('capture', pitch);
+          } else {
+            SoundManager.playSound('move', pitch);
+          }
+        }
+      }
+      renderedEventsCount = events.length;
+    }
+
+    // --- Phase Transition Sounds (Prediction Locked / Turn Changed) ---
+    if (previousTurn && previousPhase) {
+      const myTurnStr = myColor === PieceColor.WHITE ? 'white' : 'black';
+      const oppTurnStr = myColor === PieceColor.WHITE ? 'black' : 'white';
+
+      const playerPredictingBefore = (previousTurn === myTurnStr && previousPhase === 'predict');
+      const opponentMovingNow = (activeGame.currentTurn === oppTurnStr && activeGame.phase === 'move');
+
+      const opponentPredictingBefore = (previousTurn === oppTurnStr && previousPhase === 'predict');
+      const playerMovingNow = (activeGame.currentTurn === myTurnStr && activeGame.phase === 'move');
+
+      if ((playerPredictingBefore && opponentMovingNow) || (opponentPredictingBefore && playerMovingNow)) {
+        SoundManager.playSound('genericnotify', 1.4);
+      }
+    }
+    previousTurn = activeGame.currentTurn;
+    previousPhase = activeGame.phase;
+  }
+
   const eventsToApply = reviewIndex === -1 ? events : (reviewIndex === -2 ? [] : events.slice(0, reviewIndex + 1));
   activeBoard.applyMoves(eventsToApply);
 
@@ -1072,6 +1235,7 @@ async function submitTacticalMove(uci) {
         lastActionTime: now
       });
       showToast('Prediction submitted!', 'success');
+      SoundManager.playSound('genericnotify', 1.25);
     } catch (e) {
       showToast('Failed to lock prediction.', 'error');
     }
@@ -1555,6 +1719,13 @@ function enterBotGame(selectedElo = 1200) {
   legalTargets = [];
   promotionPendingMove = null;
 
+  // Reset sound and clock state variables
+  renderedEventsCount = -1;
+  lastPlayedLowTimeSecond = -1;
+  previousTurn = "";
+  previousPhase = "";
+  lastAnimatedTrapIndex = -1;
+
   showScreen('game');
 
   const uid = currentUid || 'anonymous';
@@ -1640,6 +1811,7 @@ function handleLocalPrediction(uci) {
   };
   activeGame = nextGame;
   saveBotGame(nextGame);
+  SoundManager.playSound('genericnotify', 1.25);
   renderGameRoom();
 }
 
@@ -1841,6 +2013,7 @@ function updateLoginBotButton() {
 let gameTimerInterval = null;
 
 function startGameClocks() {
+  lastPlayedLowTimeSecond = -1;
   if (gameTimerInterval) clearInterval(gameTimerInterval);
   gameTimerInterval = setInterval(() => {
     updateGameClocksUI();
@@ -1848,6 +2021,7 @@ function startGameClocks() {
 }
 
 function stopGameClocks() {
+  lastPlayedLowTimeSecond = -1;
   if (gameTimerInterval) clearInterval(gameTimerInterval);
   gameTimerInterval = null;
 }
@@ -1925,11 +2099,20 @@ function updateGameClocksUI() {
   myTimerEl.textContent = formatTimeMs(myTime, activeGame.timerType);
   oppTimerEl.textContent = formatTimeMs(oppTime, activeGame.timerType);
 
-  // Turn ticking highlights
+  // Turn ticking highlights and low-time audio warnings
   const myTurnColor = myColor === PieceColor.WHITE ? 'white' : 'black';
   if (activeGame.currentTurn === myTurnColor) {
     myTimerEl.classList.add('active-turn');
     oppTimerEl.classList.remove('active-turn');
+
+    // Play low-time warnings under 30s for Blitz 30m
+    if (activeGame.timerType === 'friend_30m') {
+      const currentSecond = Math.floor(myTime / 1000);
+      if (myTime < 30000 && currentSecond !== lastPlayedLowTimeSecond) {
+        lastPlayedLowTimeSecond = currentSecond;
+        SoundManager.playSound('lowtime');
+      }
+    }
   } else {
     oppTimerEl.classList.add('active-turn');
     myTimerEl.classList.remove('active-turn');
