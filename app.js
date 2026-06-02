@@ -774,6 +774,10 @@ async function challengeFriend(friendUid, friendUsername) {
       pendingPrediction: "",
       status: "active",
       result: "",
+      timerType: "friend_3d",
+      whiteTimeLeft: 259200000,
+      blackTimeLeft: 259200000,
+      lastActionTime: Date.now(),
       createdAt: serverTimestamp()
     };
 
@@ -811,6 +815,12 @@ function enterGame(gameId) {
   gameListener = onSnapshot(doc(db, 'games', gameId), (docSnap) => {
     if (!docSnap.exists()) return;
     activeGame = docSnap.data();
+
+    myColor = activeGame.whiteUid === currentUid ? PieceColor.WHITE : PieceColor.BLACK;
+    isFlipped = myColor === PieceColor.BLACK;
+    document.getElementById('game-opponent-name').textContent =
+      myColor === PieceColor.WHITE ? activeGame.blackUsername : activeGame.whiteUsername;
+    document.getElementById('game-my-name').textContent = currentUsername || 'You';
 
     if (reviewIndex >= activeGame.events.size) {
       reviewIndex = -1;
