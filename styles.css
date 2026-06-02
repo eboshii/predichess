@@ -249,8 +249,8 @@ body {
 }
 
 .login-logo {
-  width: 88px;
-  height: 88px;
+  width: 160px;
+  height: 160px;
   margin-bottom: 16px;
 }
 
@@ -337,8 +337,8 @@ body {
 }
 
 .header-logo {
-  width: 40px;
-  height: 40px;
+  width: 52px;
+  height: 52px;
   flex-shrink: 0;
 }
 
