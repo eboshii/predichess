@@ -50,8 +50,12 @@
             <div id="user-display-name" class="username-subtext">...</div>
           </div>
           <div class="header-right">
-            <button id="btn-dashboard-help" class="btn-text-blue">HELP</button>
-            <button id="btn-dashboard-logout" class="btn-text-red">LOGOUT</button>
+            <button id="btn-dashboard-settings" class="btn-cog" title="Settings &amp; Help">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
           </div>
         </header>
 
@@ -224,18 +228,25 @@
       </div>
     </div>
 
-    <!-- 5. HOW TO PLAY / HELP SCREEN -->
-    <div id="screen-help" class="screen">
+    <!-- 5. SETTINGS & HELP SCREEN -->
+    <div id="screen-settings" class="screen">
       <div class="dashboard-content" style="padding: 60px 24px; display: flex; flex-direction: column;">
         <header class="tab-header" style="max-width: 700px; margin: 0 auto 30px auto; width: 100%;">
-          <button id="btn-help-back" class="btn-text-blue" style="width: fit-content; margin-bottom: 20px; display: inline-flex; align-items: center; gap: 8px;">
+          <button id="btn-settings-back" class="btn-text-blue" style="width: fit-content; margin-bottom: 20px; display: inline-flex; align-items: center; gap: 8px;">
             ← BACK TO DASHBOARD
           </button>
-          <h2 class="tab-title" style="font-size: 24px; letter-spacing: 0.1em; color: #fff;">PREDICHESS GUIDE</h2>
-          <p class="tab-subtitle">Comprehensive rules for the tactical prediction system</p>
+          <h2 class="tab-title" style="font-size: 24px; letter-spacing: 0.1em; color: #fff;">SETTINGS &amp; HELP</h2>
+          <p class="tab-subtitle">Tactical prediction system configuration and comprehensive guide</p>
         </header>
 
-        <div class="help-content">
+        <div class="help-content" style="max-width: 700px; margin: 0 auto; width: 100%;">
+          <!-- Centered Simple Explanation Card (Matching Android App exactly!) -->
+          <div class="settings-explanation-card">
+            <p class="settings-explanation-text">
+              After moving, you secretly predict which piece and square your opponent will play next. If a player makes a predicted move, the piece is destroyed and they must move again.
+            </p>
+          </div>
+
           <div class="help-card">
             
             <div class="help-section">
@@ -285,6 +296,9 @@
             </div>
 
           </div>
+          
+          <!-- Bottom Logout Button (Matching Android App exactly!) -->
+          <button id="btn-settings-logout" class="btn-block-red" style="margin-top: 24px; width: 100%;">LOGOUT</button>
         </div>
       </div>
     </div>

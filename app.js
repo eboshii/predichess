@@ -166,7 +166,7 @@ const BotGameStore = {
 
   hasActiveGame(uid) {
     const game = this.load(uid);
-    return game && game.status === "active";
+    return game && game.status === "active" && game.events && game.events.length > 0;
   },
 
   saveToHistory(uid, game) {
@@ -207,7 +207,7 @@ const screens = {
   username: document.getElementById('screen-username'),
   dashboard: document.getElementById('screen-dashboard'),
   game: document.getElementById('screen-game'),
-  help: document.getElementById('screen-help')
+  settings: document.getElementById('screen-settings')
 };
 
 function showScreen(screenId) {
@@ -403,17 +403,23 @@ document.getElementById('btn-login-play-bot').addEventListener('click', () => {
   enterBotGame();
 });
 
-// Logout listener
-document.getElementById('btn-dashboard-logout').addEventListener('click', () => {
+// Settings Cog Navigation Listener
+document.getElementById('btn-dashboard-settings').addEventListener('click', () => {
+  showScreen('settings');
+});
+
+// Settings Back Navigation Listener
+document.getElementById('btn-settings-back').addEventListener('click', () => {
+  showScreen('dashboard');
+});
+
+// Settings Logout Action Listener (Matching Android App exactly!)
+document.getElementById('btn-settings-logout').addEventListener('click', () => {
   showDialog('LOGOUT', 'Are you sure you want to end your session?', [
     { text: 'Logout', type: 'danger', action: () => signOut(auth) },
     { text: 'Cancel', type: 'cancel' }
   ]);
 });
-
-// Help buttons
-document.getElementById('btn-dashboard-help').addEventListener('click', () => showScreen('help'));
-document.getElementById('btn-help-back').addEventListener('click', () => showScreen('dashboard'));
 
 // Play bot listener
 document.getElementById('btn-play-bot').addEventListener('click', () => {
@@ -544,13 +550,14 @@ function setupDashboardListeners() {
     let activeGamesCount = 0;
 
     // First, check if there's an active local bot game
-    const botGame = BotGameStore.load(currentUid || 'anonymous');
+    const hasActiveBot = BotGameStore.hasActiveGame(currentUid || 'anonymous');
+    const botGame = hasActiveBot ? BotGameStore.load(currentUid || 'anonymous') : null;
     const playBotBtn = document.getElementById('btn-play-bot');
     if (playBotBtn) {
-      playBotBtn.textContent = (botGame && botGame.status === 'active') ? "RESUME BOT GAME" : "PLAY VS OFFLINE BOT";
+      playBotBtn.textContent = hasActiveBot ? "RESUME BOT GAME" : "PLAY VS OFFLINE BOT";
     }
 
-    if (botGame && botGame.status === 'active') {
+    if (hasActiveBot && botGame) {
       activeGamesCount++;
       const myTurn = botGame.currentTurn === 'white';
       const item = document.createElement('div');
