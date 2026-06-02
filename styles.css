@@ -248,6 +248,12 @@ body {
   text-align: center;
 }
 
+.login-logo {
+  width: 88px;
+  height: 88px;
+  margin-bottom: 16px;
+}
+
 .login-title {
   font-size: 34px;
   font-weight: 300; /* sans-serif-light */
@@ -325,7 +331,15 @@ body {
 
 .header-left {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-logo {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
 }
 
 .lobby-title {
