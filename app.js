@@ -89,7 +89,12 @@ const BotGameStore = {
       currentTurn: game.currentTurn,
       phase: game.phase,
       status: game.status,
-      result: game.result
+      result: game.result,
+      botElo: game.botElo,
+      timerType: game.timerType,
+      whiteTimeLeft: game.whiteTimeLeft,
+      blackTimeLeft: game.blackTimeLeft,
+      lastActionTime: game.lastActionTime
     };
     localStorage.setItem(`${this.PREFS_NAME}_game_${uid}`, JSON.stringify(data));
   },
@@ -99,19 +104,25 @@ const BotGameStore = {
     if (!str) return null;
     try {
       const json = JSON.parse(str);
+      const botElo = json.botElo || 1200;
       return {
         id: "offline_bot",
         whiteUid: uid,
         blackUid: "bot",
         whiteUsername: "You",
-        blackUsername: "Bot",
+        blackUsername: `Bot (${botElo} ELO)`,
         currentTurn: json.currentTurn,
         phase: json.phase,
         events: json.events || [],
         predictions: json.predictions || [],
         pendingPrediction: json.pendingPrediction || "",
         status: json.status || "active",
-        result: json.result || ""
+        result: json.result || "",
+        botElo: botElo,
+        timerType: json.timerType || "bot_20m",
+        whiteTimeLeft: json.whiteTimeLeft !== undefined ? json.whiteTimeLeft : 1200000,
+        blackTimeLeft: json.blackTimeLeft !== undefined ? json.blackTimeLeft : 1200000,
+        lastActionTime: json.lastActionTime || Date.now()
       };
     } catch (_) {
       return null;
@@ -125,6 +136,37 @@ const BotGameStore = {
   hasActiveGame(uid) {
     const game = this.load(uid);
     return game && game.status === "active";
+  },
+
+  saveToHistory(uid, game) {
+    const key = `${this.PREFS_NAME}_history_${uid}`;
+    const str = localStorage.getItem(key) || "[]";
+    try {
+      const arr = JSON.parse(str);
+      const finishedGame = {
+        ...game,
+        id: `offline_bot_${Date.now()}`,
+        status: "finished",
+        lastActionTime: Date.now()
+      };
+      arr.push(finishedGame);
+      localStorage.setItem(key, JSON.stringify(arr));
+    } catch (_) {}
+  },
+
+  loadHistory(uid) {
+    const key = `${this.PREFS_NAME}_history_${uid}`;
+    const str = localStorage.getItem(key);
+    if (!str) return [];
+    try {
+      const arr = JSON.parse(str);
+      return arr.map(game => ({
+        ...game,
+        blackUsername: `Bot (${game.botElo || 1200} ELO)`
+      }));
+    } catch (_) {
+      return [];
+    }
   }
 };
 
@@ -342,7 +384,45 @@ document.getElementById('btn-help-back').addEventListener('click', () => showScr
 
 // Play bot listener
 document.getElementById('btn-play-bot').addEventListener('click', () => {
-  enterBotGame();
+  const uid = currentUid || 'anonymous';
+  if (BotGameStore.hasActiveGame(uid)) {
+    enterBotGame();
+  } else {
+    document.getElementById('modal-difficulty').classList.add('active');
+  }
+});
+
+document.querySelectorAll('.btn-elo').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const elo = parseInt(btn.dataset.elo, 10);
+    document.getElementById('modal-difficulty').classList.remove('active');
+    enterBotGame(elo);
+  });
+});
+
+document.getElementById('btn-difficulty-cancel').addEventListener('click', () => {
+  document.getElementById('modal-difficulty').classList.remove('active');
+});
+
+// HOST CHALLENGE MODAL LISTENERS
+document.getElementById('btn-host-challenge').addEventListener('click', () => {
+  if (!currentUid) {
+    showToast('Please sign in to play online.', 'error');
+    return;
+  }
+  document.getElementById('modal-timer-select').classList.add('active');
+});
+
+document.querySelectorAll('.btn-timer-type').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const timerType = btn.dataset.timer;
+    document.getElementById('modal-timer-select').classList.remove('active');
+    hostPublicChallenge(timerType);
+  });
+});
+
+document.getElementById('btn-timer-select-cancel').addEventListener('click', () => {
+  document.getElementById('modal-timer-select').classList.remove('active');
 });
 
 // --- LOBBY & FRIENDS REALTIME LISTENERS ---
@@ -492,33 +572,53 @@ function setupDashboardListeners() {
       `;
     }
   });
+
+  setupPublicLobbyListener();
 }
 
 function cleanupListeners() {
   if (friendRequestsListener) friendRequestsListener();
   if (openGamesListener) openGamesListener();
+  if (publicChallengesListener) publicChallengesListener();
   friendRequestsListener = null;
   openGamesListener = null;
+  publicChallengesListener = null;
 }
 
 // TAB MANAGEMENT IN DASHBOARD
 const tabPlay = document.getElementById('tab-play');
 const tabFriends = document.getElementById('tab-friends');
+const tabPerformance = document.getElementById('tab-performance');
 const panePlay = document.getElementById('pane-play');
 const paneFriends = document.getElementById('pane-friends');
+const panePerformance = document.getElementById('pane-performance');
 
 tabPlay.addEventListener('click', () => {
   tabPlay.classList.add('active');
   tabFriends.classList.remove('active');
+  tabPerformance.classList.remove('active');
   panePlay.classList.add('active');
   paneFriends.classList.remove('active');
+  panePerformance.classList.remove('active');
 });
 
 tabFriends.addEventListener('click', () => {
   tabFriends.classList.add('active');
   tabPlay.classList.remove('active');
+  tabPerformance.classList.remove('active');
   paneFriends.classList.add('active');
   panePlay.classList.remove('active');
+  panePerformance.classList.remove('active');
+});
+
+tabPerformance.addEventListener('click', () => {
+  tabPerformance.classList.add('active');
+  tabPlay.classList.remove('active');
+  tabFriends.classList.remove('active');
+  panePerformance.classList.add('active');
+  panePlay.classList.remove('active');
+  paneFriends.classList.remove('active');
+  renderPerformanceTab();
 });
 
 // Add Friend Logic
@@ -647,13 +747,6 @@ function enterGame(gameId) {
   gameListener = onSnapshot(doc(db, 'games', gameId), (docSnap) => {
     if (!docSnap.exists()) return;
     activeGame = docSnap.data();
-
-    myColor = activeGame.whiteUid === currentUid ? PieceColor.WHITE : PieceColor.BLACK;
-    isFlipped = (myColor === PieceColor.BLACK);
-
-    const opponentName = myColor === PieceColor.WHITE ? activeGame.blackUsername : activeGame.whiteUsername;
-    document.getElementById('game-opponent-name').textContent = opponentName;
-    document.getElementById('game-my-name').textContent = currentUsername;
 
     if (reviewIndex >= activeGame.events.size) {
       reviewIndex = -1;
@@ -958,12 +1051,23 @@ async function submitTacticalMove(uci) {
     return;
   }
 
+  const now = Date.now();
+  const elapsed = now - (activeGame.lastActionTime || now);
+  const myTurnColor = myColor === PieceColor.WHITE ? 'white' : 'black';
+
   if (inPredictPhase) {
+    // End of turn -> deduct elapsed time from our clock!
+    const whiteTime = myTurnColor === 'white' ? Math.max(0, (activeGame.whiteTimeLeft || 1800000) - elapsed) : (activeGame.whiteTimeLeft || 1800000);
+    const blackTime = myTurnColor === 'black' ? Math.max(0, (activeGame.blackTimeLeft || 1800000) - elapsed) : (activeGame.blackTimeLeft || 1800000);
+
     try {
       await updateDoc(doc(db, 'games', activeGameId), {
         pendingPrediction: uci,
         phase: 'move',
-        currentTurn: oppTurnStr
+        currentTurn: oppTurnStr,
+        whiteTimeLeft: whiteTime,
+        blackTimeLeft: blackTime,
+        lastActionTime: now
       });
       showToast('Prediction submitted!', 'success');
     } catch (e) {
@@ -988,20 +1092,27 @@ async function submitTacticalMove(uci) {
             predictions: arrayUnion(prediction),
             status: "finished",
             result: resultStatus,
-            pendingPrediction: ""
+            pendingPrediction: "",
+            lastActionTime: now
           });
           batch.update(doc(db, 'users', activeGame.whiteUid), { openGames: arrayRemove(activeGameId) });
           batch.update(doc(db, 'users', activeGame.blackUid), { openGames: arrayRemove(activeGameId) });
           await batch.commit();
         } catch (_) {}
       } else {
+        const whiteTime = myTurnColor === 'white' ? Math.max(0, (activeGame.whiteTimeLeft || 1800000) - elapsed) : (activeGame.whiteTimeLeft || 1800000);
+        const blackTime = myTurnColor === 'black' ? Math.max(0, (activeGame.blackTimeLeft || 1800000) - elapsed) : (activeGame.blackTimeLeft || 1800000);
+
         try {
           await updateDoc(doc(db, 'games', activeGameId), {
             events: arrayUnion(trapEvent),
             predictions: arrayUnion(prediction),
             phase: 'move',
             currentTurn: myTurnStr,
-            pendingPrediction: ""
+            pendingPrediction: "",
+            whiteTimeLeft: whiteTime,
+            blackTimeLeft: blackTime,
+            lastActionTime: now
           });
         } catch (_) {}
       }
@@ -1036,6 +1147,13 @@ function updateGameHUD(gameRes) {
   const btnLast = document.getElementById('btn-game-last');
 
   const eventsSize = (activeGame.events || []).length;
+  const isFinished = activeGame.status === 'finished' || activeGame.status === 'completed';
+
+  // Toggle resign button based on game finished state
+  document.getElementById('btn-game-resign').style.display = isFinished ? 'none' : 'block';
+
+  // Customize LIVE button text for finished games
+  btnLast.textContent = isFinished ? "END" : "LIVE";
 
   if (reviewIndex !== -1) {
     // Reviewing banner
@@ -1053,11 +1171,19 @@ function updateGameHUD(gameRes) {
     btnNext.disabled = true;
     btnLast.disabled = true;
 
-    if (gameRes !== GameResult.ONGOING) {
+    if (isFinished || gameRes !== GameResult.ONGOING) {
       banner.style.color = "var(--text-secondary)";
-      const winner = gameRes === GameResult.CHECKMATE_WHITE_WINS ? 'White wins!' : 
-                     gameRes === GameResult.CHECKMATE_BLACK_WINS ? 'Black wins!' : 'Draw.';
-      banner.textContent = `GAME CONCLUDED: ${winner.toUpperCase()}`;
+      let resultLabel = "GAME CONCLUDED";
+      if (activeGame.result) {
+        if (activeGame.result === 'white_wins') resultLabel = "WHITE WINS";
+        else if (activeGame.result === 'black_wins') resultLabel = "BLACK WINS";
+        else if (activeGame.result === 'draw') resultLabel = "DRAW";
+      } else {
+        const winner = gameRes === GameResult.CHECKMATE_WHITE_WINS ? 'WHITE WINS' : 
+                       gameRes === GameResult.CHECKMATE_BLACK_WINS ? 'BLACK WINS' : 'DRAW';
+        resultLabel = winner;
+      }
+      banner.textContent = resultLabel;
       return;
     }
 
@@ -1409,7 +1535,7 @@ function getPieceSvg(type, color) {
 }
 
 // --- LOCAL BOT GAMEPLAY SYSTEM ---
-function enterBotGame() {
+function enterBotGame(selectedElo = 1200) {
   activeGameId = 'offline_bot';
   reviewIndex = -1;
   selSquare = null;
@@ -1421,21 +1547,26 @@ function enterBotGame() {
   const uid = currentUid || 'anonymous';
   let game = BotGameStore.load(uid);
 
-  if (!game || game.status !== 'active') {
+  if (!game || game.status !== 'active' || (game.status === 'active' && selectedElo && game.botElo !== selectedElo)) {
     // Start a new bot game!
     game = {
       id: "offline_bot",
       whiteUid: uid,
       blackUid: "bot",
       whiteUsername: currentUsername || "You",
-      blackUsername: "Bot",
+      blackUsername: `Bot (${selectedElo} ELO)`,
       currentTurn: "white",
       phase: "move",
       events: [],
       predictions: [],
       pendingPrediction: "",
       status: "active",
-      result: ""
+      result: "",
+      botElo: selectedElo,
+      timerType: "bot_20m",
+      whiteTimeLeft: 1200000, // 20 mins
+      blackTimeLeft: 1200000,
+      lastActionTime: Date.now()
     };
     BotGameStore.save(uid, game);
   }
@@ -1444,10 +1575,16 @@ function enterBotGame() {
   myColor = PieceColor.WHITE;
   isFlipped = false;
 
-  document.getElementById('game-opponent-name').textContent = "Bot";
+  document.getElementById('game-opponent-name').textContent = activeGame.blackUsername;
   document.getElementById('game-my-name').textContent = currentUsername || "You";
 
   renderGameRoom();
+  
+  if (activeGame.status === 'active') {
+    startGameClocks();
+  } else {
+    stopGameClocks();
+  }
 }
 
 function saveBotGame(game) {
@@ -1478,11 +1615,15 @@ function handleLocalMove(uci) {
 
 function handleLocalPrediction(uci) {
   if (!activeGame) return;
+  const now = Date.now();
+  const elapsed = now - (activeGame.lastActionTime || now);
   const nextGame = {
     ...activeGame,
     pendingPrediction: uci,
     phase: 'move',
-    currentTurn: 'black'
+    currentTurn: 'black',
+    whiteTimeLeft: Math.max(0, (activeGame.whiteTimeLeft || 1200000) - elapsed),
+    lastActionTime: now
   };
   activeGame = nextGame;
   saveBotGame(nextGame);
@@ -1495,6 +1636,8 @@ function handleLocalTrap(game, moveUci) {
   const fromRow = 8 - parseInt(moveUci[1], 10);
   const piece = activeBoard.squares[fromRow][fromCol];
   const trapEvent = `trap:${fromSquare}`;
+  const now = Date.now();
+  const elapsed = now - (game.lastActionTime || now);
 
   if (piece && piece.type === PieceType.KING) {
     const nextGame = {
@@ -1503,10 +1646,13 @@ function handleLocalTrap(game, moveUci) {
       predictions: [...game.predictions, game.pendingPrediction],
       status: 'completed',
       result: 'black_wins',
-      pendingPrediction: ""
+      pendingPrediction: "",
+      whiteTimeLeft: Math.max(0, (game.whiteTimeLeft || 1200000) - elapsed),
+      lastActionTime: now
     };
     activeGame = nextGame;
     saveBotGame(nextGame);
+    BotGameStore.saveToHistory(currentUid || 'anonymous', nextGame);
     renderGameRoom();
     finalizeLocalBotGame(GameResult.CHECKMATE_BLACK_WINS);
   } else {
@@ -1516,7 +1662,9 @@ function handleLocalTrap(game, moveUci) {
       predictions: [...game.predictions, game.pendingPrediction],
       currentTurn: 'white',
       phase: 'move',
-      pendingPrediction: ""
+      pendingPrediction: "",
+      whiteTimeLeft: Math.max(0, (game.whiteTimeLeft || 1200000) - elapsed),
+      lastActionTime: now
     };
     activeGame = nextGame;
     saveBotGame(nextGame);
@@ -1539,23 +1687,28 @@ function triggerBotAction() {
   botTimeoutId = setTimeout(() => {
     try {
       const boardCopy = activeBoard.copy();
+      const elo = activeGame.botElo || 1200;
+      const now = Date.now();
+      const elapsed = now - (activeGame.lastActionTime || now);
 
       if (activeGame.phase === 'predict') {
-        // Bot predicts player's next move using weighted prediction sampler
-        const botPrediction = BotEngine.getWeightedPrediction(boardCopy, PieceColor.WHITE);
+        // Bot predicts player's next move using ELO-scalable prediction sampler
+        const botPrediction = BotEngine.getWeightedPrediction(boardCopy, PieceColor.WHITE, elo);
         const nextGame = {
           ...activeGame,
           pendingPrediction: botPrediction,
           phase: 'move',
-          currentTurn: 'white'
+          currentTurn: 'white',
+          blackTimeLeft: Math.max(0, (activeGame.blackTimeLeft || 1200000) - elapsed),
+          lastActionTime: now
         };
         activeGame = nextGame;
         saveBotGame(nextGame);
         botRunning = false;
         renderGameRoom();
       } else if (activeGame.phase === 'move') {
-        // Bot plays its move using minimax with alpha-beta pruning (3 plies deep)
-        const botMove = BotEngine.getBestMove(boardCopy, PieceColor.BLACK, 3);
+        // Bot plays its move using minimax alpha-beta pruning (depth based on ELO)
+        const botMove = BotEngine.getBestMove(boardCopy, PieceColor.BLACK, elo);
         if (botMove) {
           const uci = botMove.toUci();
           const prediction = activeGame.pendingPrediction || "";
@@ -1576,12 +1729,16 @@ function triggerBotAction() {
                 predictions: [...activeGame.predictions, prediction],
                 status: 'completed',
                 result: 'white_wins',
-                pendingPrediction: ""
+                pendingPrediction: "",
+                blackTimeLeft: Math.max(0, (activeGame.blackTimeLeft || 1200000) - elapsed),
+                lastActionTime: now
               };
               activeGame = nextGame;
               saveBotGame(nextGame);
+              BotGameStore.saveToHistory(currentUid || 'anonymous', nextGame);
               botRunning = false;
               renderGameRoom();
+              finalizeLocalBotGame(GameResult.CHECKMATE_WHITE_WINS);
             } else {
               // Bot piece is vaporized -> Bot gets a compensation move!
               const nextGame = {
@@ -1590,7 +1747,9 @@ function triggerBotAction() {
                 predictions: [...activeGame.predictions, prediction],
                 currentTurn: 'black',
                 phase: 'move',
-                pendingPrediction: ""
+                pendingPrediction: "",
+                blackTimeLeft: Math.max(0, (activeGame.blackTimeLeft || 1200000) - elapsed),
+                lastActionTime: now
               };
               activeGame = nextGame;
               saveBotGame(nextGame);
@@ -1605,7 +1764,9 @@ function triggerBotAction() {
               predictions: [...activeGame.predictions, prediction],
               phase: 'predict',
               currentTurn: 'black',
-              pendingPrediction: ""
+              pendingPrediction: "",
+              blackTimeLeft: Math.max(0, (activeGame.blackTimeLeft || 1200000) - elapsed),
+              lastActionTime: now
             };
             activeGame = nextGame;
             saveBotGame(nextGame);
@@ -1631,7 +1792,8 @@ function finalizeLocalBotGame(result) {
   const nextGame = {
     ...activeGame,
     status: 'completed',
-    result: statusStr
+    result: statusStr,
+    lastActionTime: Date.now()
   };
   activeGame = nextGame;
   saveBotGame(nextGame);
@@ -1656,4 +1818,444 @@ function updateLoginBotButton() {
     const hasActive = BotGameStore.hasActiveGame('anonymous');
     btn.textContent = hasActive ? "RESUME OFFLINE BOT GAME" : "PLAY VS OFFLINE BOT";
   }
+}
+
+// ============================================
+// NEW FEATURE IMPLEMENTATIONS (1-4)
+// ============================================
+
+// --- ACTIVE GAME COUNTDOWN CLOCK TICKERS ---
+let gameTimerInterval = null;
+
+function startGameClocks() {
+  if (gameTimerInterval) clearInterval(gameTimerInterval);
+  gameTimerInterval = setInterval(() => {
+    updateGameClocksUI();
+  }, 200);
+}
+
+function stopGameClocks() {
+  if (gameTimerInterval) clearInterval(gameTimerInterval);
+  gameTimerInterval = null;
+}
+
+function updateGameClocksUI() {
+  if (!activeGame) {
+    document.getElementById('game-my-timer').style.display = 'none';
+    document.getElementById('game-opponent-timer').style.display = 'none';
+    return;
+  }
+
+  // Handle finished game static displays
+  if (activeGame.status === 'finished' || activeGame.status === 'completed') {
+    const myTime = myColor === PieceColor.WHITE ? activeGame.whiteTimeLeft : activeGame.blackTimeLeft;
+    const oppTime = myColor === PieceColor.WHITE ? activeGame.blackTimeLeft : activeGame.whiteTimeLeft;
+    
+    const myTimerEl = document.getElementById('game-my-timer');
+    const oppTimerEl = document.getElementById('game-opponent-timer');
+
+    if (activeGame.timerType) {
+      myTimerEl.style.display = 'inline-block';
+      oppTimerEl.style.display = 'inline-block';
+      myTimerEl.textContent = formatTimeMs(myTime, activeGame.timerType);
+      oppTimerEl.textContent = formatTimeMs(oppTime, activeGame.timerType);
+    } else {
+      myTimerEl.style.display = 'none';
+      oppTimerEl.style.display = 'none';
+    }
+    myTimerEl.classList.remove('active-turn');
+    oppTimerEl.classList.remove('active-turn');
+    return;
+  }
+
+  if (!activeGame.timerType) {
+    document.getElementById('game-my-timer').style.display = 'none';
+    document.getElementById('game-opponent-timer').style.display = 'none';
+    return;
+  }
+
+  const now = Date.now();
+  let elapsed = 0;
+  if (activeGame.lastActionTime > 0) {
+    elapsed = now - activeGame.lastActionTime;
+  }
+
+  let whiteTime = activeGame.whiteTimeLeft || 0;
+  let blackTime = activeGame.blackTimeLeft || 0;
+
+  if (activeGame.currentTurn === 'white') {
+    whiteTime = Math.max(0, whiteTime - elapsed);
+  } else if (activeGame.currentTurn === 'black') {
+    blackTime = Math.max(0, blackTime - elapsed);
+  }
+
+  // Timeout handler triggers
+  if (whiteTime <= 0 && activeGame.currentTurn === 'white') {
+    handleTimeoutLoss('white');
+    return;
+  }
+  if (blackTime <= 0 && activeGame.currentTurn === 'black') {
+    handleTimeoutLoss('black');
+    return;
+  }
+
+  // Calculate my timing vs opponent
+  const myTime = myColor === PieceColor.WHITE ? whiteTime : blackTime;
+  const oppTime = myColor === PieceColor.WHITE ? blackTime : whiteTime;
+
+  const myTimerEl = document.getElementById('game-my-timer');
+  const oppTimerEl = document.getElementById('game-opponent-timer');
+
+  myTimerEl.style.display = 'inline-block';
+  oppTimerEl.style.display = 'inline-block';
+
+  myTimerEl.textContent = formatTimeMs(myTime, activeGame.timerType);
+  oppTimerEl.textContent = formatTimeMs(oppTime, activeGame.timerType);
+
+  // Turn ticking highlights
+  const myTurnColor = myColor === PieceColor.WHITE ? 'white' : 'black';
+  if (activeGame.currentTurn === myTurnColor) {
+    myTimerEl.classList.add('active-turn');
+    oppTimerEl.classList.remove('active-turn');
+  } else {
+    oppTimerEl.classList.add('active-turn');
+    myTimerEl.classList.remove('active-turn');
+  }
+}
+
+function formatTimeMs(ms, timerType) {
+  if (ms <= 0) return "00:00";
+  if (timerType === 'friend_3d') {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) {
+      return `${days}d ${hours % 24}h`;
+    } else {
+      return `${hours}h ${minutes % 60}m`;
+    }
+  } else {
+    const totalSeconds = Math.floor(ms / 1000);
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+}
+
+async function handleTimeoutLoss(losingColor) {
+  stopGameClocks();
+  const winningColor = losingColor === 'white' ? 'black' : 'white';
+  const resultStr = `${winningColor}_wins`;
+
+  if (activeGameId === 'offline_bot') {
+    const nextGame = {
+      ...activeGame,
+      status: 'completed',
+      result: resultStr,
+      lastActionTime: Date.now()
+    };
+    activeGame = nextGame;
+    saveBotGame(nextGame);
+    BotGameStore.saveToHistory(currentUid || 'anonymous', nextGame);
+    renderGameRoom();
+    showToast(`Game Over: ${winningColor.toUpperCase()} wins on time!`, 'info');
+  } else {
+    try {
+      const myTurnColor = myColor === PieceColor.WHITE ? 'white' : 'black';
+      if (losingColor === myTurnColor) {
+        await finalizeGameOnDBDirectly(resultStr);
+        showToast("You lost on time.", 'error');
+      }
+    } catch (_) {}
+  }
+}
+
+// --- PUBLIC MATCHMAKING LOBBY & HOSTING ---
+async function hostPublicChallenge(timerType) {
+  const uid = currentUid;
+  if (!uid) return;
+  showToast('Hosting challenge...', 'info');
+  try {
+    const challengeData = {
+      hostUid: uid,
+      hostUsername: currentUsername || 'Anonymous',
+      timerType: timerType,
+      createdAt: Date.now()
+    };
+    await addDoc(collection(db, 'open_challenges'), challengeData);
+    showToast('Challenge posted to lobby!', 'success');
+  } catch (e) {
+    showToast('Failed to host challenge.', 'error');
+  }
+}
+
+async function cancelChallenge(challengeId) {
+  try {
+    await deleteDoc(doc(db, 'open_challenges', challengeId));
+    showToast('Challenge cancelled.', 'info');
+  } catch (e) {
+    showToast('Failed to cancel challenge.', 'error');
+  }
+}
+
+async function joinChallenge(challengeId, hostUid, hostUsername, timerType) {
+  const uid = currentUid;
+  if (!uid) return;
+  showToast('Joining match...', 'info');
+  try {
+    const challengeRef = doc(db, 'open_challenges', challengeId);
+    
+    await runTransaction(db, async (transaction) => {
+      const challengeDoc = await transaction.get(challengeRef);
+      if (!challengeDoc.exists()) {
+        throw new Error("Challenge no longer exists");
+      }
+
+      // Create new game with starting timers
+      const totalTime = timerType === "friend_3d" ? 259200000 : 1800000;
+      const gameRef = doc(collection(db, 'games'));
+      const gameData = {
+        whiteUid: hostUid,
+        blackUid: uid,
+        whiteUsername: hostUsername,
+        blackUsername: currentUsername,
+        currentTurn: "white",
+        phase: "move",
+        events: [],
+        predictions: [],
+        pendingPrediction: "",
+        status: "active",
+        result: "",
+        timerType: timerType,
+        whiteTimeLeft: totalTime,
+        blackTimeLeft: totalTime,
+        lastActionTime: Date.now(),
+        createdAt: serverTimestamp()
+      };
+
+      transaction.set(gameRef, gameData);
+
+      // Update both users
+      const hostUserRef = doc(db, 'users', hostUid);
+      const challengerUserRef = doc(db, 'users', uid);
+
+      transaction.update(hostUserRef, { openGames: arrayUnion(gameRef.id) });
+      transaction.update(challengerUserRef, { openGames: arrayUnion(gameRef.id) });
+
+      // Delete challenge
+      transaction.delete(challengeRef);
+
+      // Once transaction succeeds, enter the game
+      setTimeout(() => enterGame(gameRef.id), 100);
+    });
+  } catch (e) {
+    showToast(e.message || 'Failed to join challenge.', 'error');
+  }
+}
+
+let publicChallengesListener = null;
+
+function setupPublicLobbyListener() {
+  if (publicChallengesListener) publicChallengesListener();
+
+  const q = collection(db, 'open_challenges');
+  publicChallengesListener = onSnapshot(q, (snapshot) => {
+    const listEl = document.getElementById('public-challenges-list');
+    listEl.innerHTML = '';
+
+    const challenges = [];
+    snapshot.forEach(docSnap => {
+      challenges.push({ id: docSnap.id, ...docSnap.data() });
+    });
+
+    challenges.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    if (challenges.length === 0) {
+      listEl.innerHTML = `
+        <div class="empty-state">
+          <p>No public challenges available</p>
+        </div>
+      `;
+      return;
+    }
+
+    challenges.forEach(challenge => {
+      const isMyChallenge = challenge.hostUid === currentUid;
+      const timerDesc = challenge.timerType === "friend_3d" ? "3-Day Correspondence" : "30-Minute Blitz";
+
+      const item = document.createElement('div');
+      item.className = 'game-item';
+      if (isMyChallenge) item.style.borderLeft = "3px solid var(--btn-resign)";
+
+      const left = document.createElement('div');
+      left.className = 'game-item-info';
+      left.innerHTML = `
+        <div class="game-item-opponent">${isMyChallenge ? "Your Challenge" : challenge.hostUsername}</div>
+        <div class="game-item-meta">Open Challenge • ${timerDesc}</div>
+      `;
+
+      const right = document.createElement('div');
+      if (isMyChallenge) {
+        const btnCancel = document.createElement('button');
+        btnCancel.className = 'badge badge-waiting';
+        btnCancel.style.cursor = 'pointer';
+        btnCancel.textContent = 'CANCEL';
+        btnCancel.addEventListener('click', (e) => {
+          e.stopPropagation();
+          cancelChallenge(challenge.id);
+        });
+        right.appendChild(btnCancel);
+      } else {
+        const btnPlay = document.createElement('button');
+        btnPlay.className = 'badge badge-your-turn';
+        btnPlay.style.cursor = 'pointer';
+        btnPlay.textContent = 'PLAY';
+        btnPlay.addEventListener('click', (e) => {
+          e.stopPropagation();
+          joinChallenge(challenge.id, challenge.hostUid, challenge.hostUsername, challenge.timerType);
+        });
+        right.appendChild(btnPlay);
+      }
+
+      item.appendChild(left);
+      item.appendChild(right);
+      listEl.appendChild(item);
+    });
+  });
+}
+
+// --- PERFORMANCE TAB & GAME HISTORIES ---
+async function renderPerformanceTab() {
+  const uid = currentUid;
+  const listEl = document.getElementById('history-games-list');
+  listEl.innerHTML = '<div class="empty-state"><p>Loading match history...</p></div>';
+
+  try {
+    let onlineGames = [];
+    if (uid) {
+      const qWhite = query(collection(db, 'games'), where('whiteUid', '==', uid), where('status', '==', 'finished'));
+      const qBlack = query(collection(db, 'games'), where('blackUid', '==', uid), where('status', '==', 'finished'));
+      
+      const snapWhite = await getDocs(qWhite);
+      const snapBlack = await getDocs(qBlack);
+
+      snapWhite.forEach(docSnap => {
+        onlineGames.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      snapBlack.forEach(docSnap => {
+        onlineGames.push({ id: docSnap.id, ...docSnap.data() });
+      });
+    }
+
+    const botGames = BotGameStore.loadHistory(uid || 'anonymous');
+
+    // Upload bot games to Firestore to sync histories
+    if (uid && botGames.length > 0) {
+      try {
+        for (const game of botGames) {
+          const docRef = doc(db, 'games', game.id);
+          const snap = await getDoc(docRef);
+          if (!snap.exists()) {
+            await setDoc(docRef, { ...game, status: 'finished' });
+          }
+        }
+      } catch (_) {}
+    }
+
+    const allGames = [...onlineGames, ...botGames];
+    const uniqueGames = [];
+    const seenIds = new Set();
+    for (const g of allGames) {
+      if (!seenIds.has(g.id)) {
+        seenIds.add(g.id);
+        uniqueGames.push(g);
+      }
+    }
+
+    uniqueGames.sort((a, b) => (b.lastActionTime || 0) - (a.lastActionTime || 0));
+
+    listEl.innerHTML = '';
+
+    if (uniqueGames.length === 0) {
+      listEl.innerHTML = `
+        <div class="empty-state">
+          <p>No completed games yet</p>
+        </div>
+      `;
+      return;
+    }
+
+    uniqueGames.forEach(game => {
+      const isWhite = game.whiteUid === uid;
+      const playerColor = isWhite ? 'white' : 'black';
+      const opponentName = isWhite ? game.blackUsername : game.whiteUsername;
+
+      let timerDesc = "30-Minute Blitz";
+      if (game.timerType === 'friend_3d') timerDesc = "3-Day Correspondence";
+      else if (game.timerType === 'bot_20m') timerDesc = "20-Minute Offline Bot Match";
+      else if (game.botElo) timerDesc = `Offline Bot Match (${game.botElo} ELO)`;
+
+      let outcomeText = "DRAW";
+      let badgeClass = "badge-draw";
+      if (game.result === `${playerColor}_wins`) {
+        outcomeText = "WIN";
+        badgeClass = "badge-win";
+      } else if (game.result && game.result !== 'draw') {
+        outcomeText = "LOSS";
+        badgeClass = "badge-loss";
+      }
+
+      const item = document.createElement('div');
+      item.className = 'game-item';
+      item.innerHTML = `
+        <div class="game-item-info">
+          <div class="game-item-avatar">${game.botElo ? '🤖' : '♟'}</div>
+          <div>
+            <div class="game-item-opponent">${opponentName}</div>
+            <div class="game-item-meta">${timerDesc}</div>
+          </div>
+        </div>
+        <span class="badge ${badgeClass}">${outcomeText}</span>
+      `;
+
+      item.addEventListener('click', () => {
+        enterGameInReviewMode(game);
+      });
+
+      listEl.appendChild(item);
+    });
+
+  } catch (e) {
+    listEl.innerHTML = `
+      <div class="empty-state">
+        <p>Failed to load match history</p>
+      </div>
+    `;
+  }
+}
+
+function enterGameInReviewMode(game) {
+  activeGameId = game.id;
+  activeGame = game;
+  reviewIndex = game.events.length - 1; // start review at last state
+  selSquare = null;
+  legalTargets = [];
+  promotionPendingMove = null;
+
+  myColor = game.whiteUid === (currentUid || 'anonymous') ? PieceColor.WHITE : PieceColor.BLACK;
+  isFlipped = myColor === PieceColor.BLACK;
+
+  showScreen('game');
+
+  if (gameListener) {
+    gameListener();
+    gameListener = null;
+  }
+
+  document.getElementById('game-opponent-name').textContent = myColor === PieceColor.WHITE ? game.blackUsername : game.whiteUsername;
+  document.getElementById('game-my-name').textContent = myColor === PieceColor.WHITE ? game.whiteUsername : game.blackUsername;
+
+  renderGameRoom();
 }

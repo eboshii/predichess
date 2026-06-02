@@ -744,7 +744,7 @@ export const BotEngine = {
     }
   },
 
-  getBestMove(board, color, depth = 3) {
+  getBestMove(board, color, elo = 1600) {
     const isMaximizing = color === PieceColor.WHITE;
     const legal = board.legalMoves(color);
     if (legal.length === 0) return null;
@@ -836,7 +836,29 @@ export const BotEngine = {
       }
     }
 
-    const searchDepth = legal.length > 25 ? depth - 1 : depth;
+    // Dynamic ELO configurations
+    let depth;
+    let blunderChance;
+    if (elo <= 800) {
+      depth = 1;
+      blunderChance = 0.35;
+    } else if (elo <= 1200) {
+      depth = 2;
+      blunderChance = 0.15;
+    } else if (elo <= 1600) {
+      depth = 3;
+      blunderChance = 0.05;
+    } else {
+      depth = 4;
+      blunderChance = 0.0;
+    }
+
+    // Blunder: play a random legal move
+    if (Math.random() < blunderChance) {
+      return legal[Math.floor(Math.random() * legal.length)];
+    }
+
+    const searchDepth = (legal.length > 25 && depth > 2) ? depth - 1 : depth;
 
     // Evaluate each legal move at searchDepth - 1
     const moveEvaluations = legal.map(move => {
@@ -886,11 +908,22 @@ export const BotEngine = {
     return topChoices[0].move;
   },
 
-  getWeightedPrediction(board, playerColor) {
+  getWeightedPrediction(board, playerColor, elo = 1600) {
     const playerMoves = board.legalMoves(playerColor);
     if (playerMoves.length === 0) return "";
 
     const isPlayerWhite = playerColor === PieceColor.WHITE;
+
+    // Dynamic blunder chances for prediction sampler
+    let blunderChance;
+    if (elo <= 800) blunderChance = 0.40;
+    else if (elo <= 1200) blunderChance = 0.20;
+    else if (elo <= 1600) blunderChance = 0.08;
+    else blunderChance = 0.0;
+
+    if (Math.random() < blunderChance) {
+      return playerMoves[Math.floor(Math.random() * playerMoves.length)].toUci();
+    }
 
     // Pair each move with its evaluation after the player makes it
     const moveEvaluations = playerMoves.map(move => {

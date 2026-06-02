@@ -59,6 +59,7 @@
         <div class="tab-layout">
           <button id="tab-play" class="tab-button active">PLAY</button>
           <button id="tab-friends" class="tab-button">FRIENDS</button>
+          <button id="tab-performance" class="tab-button">PERFORMANCE</button>
         </div>
 
         <!-- Main Dashboard Viewport -->
@@ -66,9 +67,10 @@
           
           <!-- TAB A: PLAY PANEL -->
           <div id="pane-play" class="tab-pane active">
-            <!-- Centered Bot Play Button with breathing room -->
-            <div class="bot-play-container">
+            <!-- Centered Buttons for Bot and Public Challenges -->
+            <div class="bot-play-container" style="display: flex; gap: 16px; justify-content: center;">
               <button id="btn-play-bot" class="btn-outlined-blue">PLAY VS OFFLINE BOT</button>
+              <button id="btn-host-challenge" class="btn-outlined-white">HOST PUBLIC CHALLENGE</button>
             </div>
 
             <div class="dashboard-grid">
@@ -76,12 +78,25 @@
               <!-- Active Games List -->
               <div class="card-panel">
                 <div class="panel-header">
-                  <h3 class="panel-title">OPEN GAMES</h3>
+                  <h3 class="panel-title">ACTIVE GAMES</h3>
                 </div>
                 <div class="scroll-container" id="open-games-list">
                   <!-- JS Dynamic Insertion -->
                   <div class="empty-state">
                     <p>No active games</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Public Matchmaking Lobby -->
+              <div class="card-panel">
+                <div class="panel-header">
+                  <h3 class="panel-title">PUBLIC LOBBY</h3>
+                </div>
+                <div class="scroll-container" id="public-challenges-list">
+                  <!-- JS Dynamic Insertion -->
+                  <div class="empty-state">
+                    <p>No public challenges available</p>
                   </div>
                 </div>
               </div>
@@ -121,6 +136,25 @@
             </div>
           </div>
 
+          <!-- TAB C: PERFORMANCE PANEL -->
+          <div id="pane-performance" class="tab-pane">
+            <div class="dashboard-grid">
+              
+              <!-- Historical Games List -->
+              <div class="card-panel">
+                <div class="panel-header">
+                  <h3 class="panel-title">MATCH HISTORY</h3>
+                </div>
+                <div class="scroll-container" id="history-games-list">
+                  <div class="empty-state">
+                    <p>No completed games yet</p>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
         </main>
       </div>
     </div>
@@ -137,6 +171,7 @@
             <button id="btn-game-exit" class="btn-back-text">←</button>
             <div class="opp-bullet-indicator"></div>
             <span id="game-opponent-name" class="opponent-text-name">Opponent</span>
+            <span id="game-opponent-timer" class="game-timer" style="display: none; margin-right: 16px;">--:--</span>
             <button id="btn-game-resign" class="btn-resign-text">RESIGN</button>
           </div>
 
@@ -161,7 +196,10 @@
 
           <!-- My Info Bar -->
           <div class="my-info-bar-bottom">
-            <div class="my-name-display" id="game-my-name">You</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+              <div class="my-name-display" id="game-my-name">You</div>
+              <span id="game-my-timer" class="game-timer" style="display: none;">--:--</span>
+            </div>
             <div class="turn-status-text-display" id="game-turn-banner">WAITING FOR OPPONENT</div>
           </div>
 
@@ -258,6 +296,38 @@
         <p class="dialog-message" id="dialog-message">Message body...</p>
         <div class="dialog-buttons" id="dialog-buttons">
           <!-- Button Injection -->
+        </div>
+      </div>
+    </div>
+
+    <!-- BOT DIFFICULTY SELECTOR MODAL -->
+    <div id="modal-difficulty" class="dialog-overlay">
+      <div class="dialog-box" style="max-width: 400px; width: 90%;">
+        <h4 class="dialog-title" style="letter-spacing: 0.1em; color: #fff;">SELECT BOT DIFFICULTY</h4>
+        <p class="dialog-message" style="margin-bottom: 20px;">Choose the ELO rating for the offline bot engine.</p>
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px;">
+          <button class="btn-outlined-blue btn-elo" data-elo="800">NOVICE (800 ELO)</button>
+          <button class="btn-outlined-blue btn-elo" data-elo="1200">MEDIUM (1200 ELO)</button>
+          <button class="btn-outlined-blue btn-elo" data-elo="1600">HARD (1600 ELO)</button>
+          <button class="btn-outlined-blue btn-elo" data-elo="2000">EXPERT (2000 ELO)</button>
+        </div>
+        <div class="dialog-buttons">
+          <button id="btn-difficulty-cancel" class="btn-dialog btn-dialog-cancel">CANCEL</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- HOST CHALLENGE TIMER SELECTOR MODAL -->
+    <div id="modal-timer-select" class="dialog-overlay">
+      <div class="dialog-box" style="max-width: 400px; width: 90%;">
+        <h4 class="dialog-title" style="letter-spacing: 0.1em; color: #fff;">HOST PUBLIC CHALLENGE</h4>
+        <p class="dialog-message" style="margin-bottom: 20px;">Select the game pace / timer type for your challenge.</p>
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px;">
+          <button class="btn-outlined-blue btn-timer-type" data-timer="friend_30m">30-MINUTE BLITZ</button>
+          <button class="btn-outlined-blue btn-timer-type" data-timer="friend_3d">3-DAY CORRESPONDENCE</button>
+        </div>
+        <div class="dialog-buttons">
+          <button id="btn-timer-select-cancel" class="btn-dialog btn-dialog-cancel">CANCEL</button>
         </div>
       </div>
     </div>
