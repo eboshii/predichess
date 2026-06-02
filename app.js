@@ -99,6 +99,7 @@ let promotionPendingMove = null;
 let friendRequestsListener = null;
 let openGamesListener = null;
 let dashboardPollInterval = null;
+let friendsRenderToken = 0;
 
 // --- SOUND NOTIFICATION AND EVENT TRACKERS ---
 let renderedEventsCount = -1;
@@ -515,21 +516,34 @@ function setupDashboardListeners() {
     if (!docSnap.exists()) return;
     currentUser = docSnap.data();
 
-    // Render Friends List
+    // Render Friends List.
+    // This handler is async (it fetches each friend's profile), so a rapid
+    // burst of snapshots can run several copies concurrently. We stamp each
+    // run with a token and only let the newest one mutate the DOM, and we
+    // build the rows off-DOM and swap them in atomically — otherwise
+    // interleaved appends produce duplicated friend rows.
     const friendsListDiv = document.getElementById('friends-list');
-    friendsListDiv.innerHTML = '';
     const friends = currentUser.friends || [];
+    const renderToken = ++friendsRenderToken;
 
     if (friends.length === 0) {
-      friendsListDiv.innerHTML = `
-        <div class="empty-state">
-          <p>No friends added yet</p>
-        </div>
-      `;
+      if (renderToken === friendsRenderToken) {
+        friendsListDiv.innerHTML = `
+          <div class="empty-state">
+            <p>No friends added yet</p>
+          </div>
+        `;
+      }
     } else {
-      for (const fUid of friends) {
-        const fDoc = await getDoc(doc(db, 'users', fUid));
-        if (fDoc.exists()) {
+      const fDocs = await Promise.all(
+        friends.map(fUid => getDoc(doc(db, 'users', fUid)).catch(() => null))
+      );
+      // A newer snapshot superseded us while we were fetching — let it win.
+      if (renderToken === friendsRenderToken) {
+        const fragment = document.createDocumentFragment();
+        fDocs.forEach((fDoc, i) => {
+          if (!fDoc || !fDoc.exists()) return;
+          const fUid = friends[i];
           const fData = fDoc.data();
           const item = document.createElement('div');
           item.className = 'friend-item';
@@ -544,8 +558,10 @@ function setupDashboardListeners() {
           item.querySelector('.btn-challenge').addEventListener('click', () => {
             challengeFriend(fUid, fData.username);
           });
-          friendsListDiv.appendChild(item);
-        }
+          fragment.appendChild(item);
+        });
+        friendsListDiv.innerHTML = '';
+        friendsListDiv.appendChild(fragment);
       }
     }
 
@@ -748,10 +764,7 @@ async function acceptFriend(fromUid) {
 async function rejectFriend(fromUid) {
   try {
     const requestDocRef = doc(db, 'users', currentUid, 'incomingRequests', fromUid);
-    await setDoc(requestDocRef, {});
-    const batch = writeBatch(db);
-    batch.delete(requestDocRef);
-    await batch.commit();
+    await deleteDoc(requestDocRef);
     showToast('Request rejected.', 'info');
   } catch (e) {
     showToast('Failed to reject request.', 'error');
@@ -781,15 +794,16 @@ async function challengeFriend(friendUid, friendUsername) {
       createdAt: serverTimestamp()
     };
 
-    const docRef = await addDoc(collection(db, 'games'), gameData);
-    const gameId = docRef.id;
-
+    // Create the game and index it on both players' profiles in one atomic
+    // batch, so a denied/failed write can never leave an orphaned game behind.
+    const gameRef = doc(collection(db, 'games'));
     const batch = writeBatch(db);
-    batch.update(doc(db, 'users', currentUid), { openGames: arrayUnion(gameId) });
-    batch.update(doc(db, 'users', friendUid), { openGames: arrayUnion(gameId) });
+    batch.set(gameRef, gameData);
+    batch.update(doc(db, 'users', currentUid), { openGames: arrayUnion(gameRef.id) });
+    batch.update(doc(db, 'users', friendUid), { openGames: arrayUnion(gameRef.id) });
     await batch.commit();
 
-    enterGame(gameId);
+    enterGame(gameRef.id);
   } catch (e) {
     showToast('Failed to challenge.', 'error');
   }
@@ -822,7 +836,7 @@ function enterGame(gameId) {
       myColor === PieceColor.WHITE ? activeGame.blackUsername : activeGame.whiteUsername;
     document.getElementById('game-my-name').textContent = currentUsername || 'You';
 
-    if (reviewIndex >= activeGame.events.size) {
+    if (reviewIndex >= (activeGame.events || []).length) {
       reviewIndex = -1;
     }
 
@@ -1403,7 +1417,7 @@ function updateGameHUD(gameRes) {
     if (isMyTurn) {
       if (inPredictPhase) {
         banner.style.color = "var(--accent-blue)";
-        banner.textContent = "PREDICT THEIR MOVE (Click & Drag Opponent Piece)";
+        banner.textContent = "PREDICT THEIR MOVE";
       } else {
         banner.style.color = "var(--accent-green)";
         banner.textContent = "YOUR TURN";
