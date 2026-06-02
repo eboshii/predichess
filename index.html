@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Predichess - Tactical Cyber Chess</title>
+  <title>Predichess</title>
   <meta name="description" content="Play Predichess, a tactical chess variant with hidden predictions and piece destruction.">
+  
+  <!-- Web Favicon (Matching Android Vector App Icon) -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   
   <!-- Custom Stylesheet -->
   <link rel="stylesheet" href="styles.css">
@@ -50,7 +53,7 @@
             <div id="user-display-name" class="username-subtext">...</div>
           </div>
           <div class="header-right">
-            <button id="btn-dashboard-settings" class="btn-cog" title="Settings &amp; Help">
+            <button id="btn-dashboard-settings" class="btn-cog" title="Settings">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="3"></circle>
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -228,15 +231,14 @@
       </div>
     </div>
 
-    <!-- 5. SETTINGS & HELP SCREEN -->
+    <!-- 5. SETTINGS SCREEN -->
     <div id="screen-settings" class="screen">
       <div class="dashboard-content" style="padding: 60px 24px; display: flex; flex-direction: column;">
         <header class="tab-header" style="max-width: 700px; margin: 0 auto 30px auto; width: 100%;">
           <button id="btn-settings-back" class="btn-text-blue" style="width: fit-content; margin-bottom: 20px; display: inline-flex; align-items: center; gap: 8px;">
             ← BACK TO DASHBOARD
           </button>
-          <h2 class="tab-title" style="font-size: 24px; letter-spacing: 0.1em; color: #fff;">SETTINGS &amp; HELP</h2>
-          <p class="tab-subtitle">Tactical prediction system configuration and comprehensive guide</p>
+          <h2 class="tab-title" style="font-size: 24px; letter-spacing: 0.1em; color: #fff;">SETTINGS</h2>
         </header>
 
         <div class="help-content" style="max-width: 700px; margin: 0 auto; width: 100%;">
@@ -245,56 +247,6 @@
             <p class="settings-explanation-text">
               After moving, you secretly predict which piece and square your opponent will play next. If a player makes a predicted move, the piece is destroyed and they must move again.
             </p>
-          </div>
-
-          <div class="help-card">
-            
-            <div class="help-section">
-              <h3 class="help-heading">
-                Core Concept: The Prediction Phase
-              </h3>
-              <p class="help-text">
-                Predichess is played on a standard chess board with regular pieces, but with a highly crucial twist. Every time you make a move, you do not immediately pass the turn to the opponent. Instead, your screen flips, and you enter the <strong>Prediction Mode</strong>.
-              </p>
-              <p class="help-text">
-                During this mode, you select one of your opponent's pieces and click-and-drag it to designate where you think they will move on their turn. Once submitted, your prediction is locked in silently, and the turn passes to your opponent.
-              </p>
-            </div>
-
-            <div class="help-section">
-              <h3 class="help-heading">
-                Sprung Traps & Piece Vaporization
-              </h3>
-              <p class="help-text">
-                When the opponent makes a move, the system automatically checks if it matches your pending prediction:
-              </p>
-              <ul class="help-rule-list">
-                <li>
-                  <strong>Direct Hit (Trap Sprung!):</strong> If they make exactly the move you predicted, a tactical trap is sprung! Their moving piece is <strong>vaporized (destroyed)</strong> before it can complete its path.
-                </li>
-                <li>
-                  <strong>Compensation Move:</strong> Since their piece was destroyed, they retain the turn to make another move (a compensation move). No predictions are checked on a compensation move, and they cannot trigger traps.
-                </li>
-                <li>
-                  <strong>Trap Missed:</strong> If they make any other move, their move completes normally, and the prediction is cleared without effect.
-                </li>
-              </ul>
-            </div>
-
-            <div class="help-section">
-              <h3 class="help-heading">
-                Tactical Victory Conditions
-              </h3>
-              <p class="help-text">
-                There are multiple ways to claim victory on the battleground:
-              </p>
-              <ul class="help-rule-list">
-                <li><strong>Checkmate:</strong> Traditional chess checkmate wins the game.</li>
-                <li><strong>King Vaporization (The ultimate trap!):</strong> If you predict exactly where the opponent will move their King, and they make that move, their King is vaporized! This is an immediate tactical knockout!</li>
-                <li><strong>Resignation:</strong> Opponent resigns out of sheer tactical defeat.</li>
-              </ul>
-            </div>
-
           </div>
           
           <!-- Bottom Logout Button (Matching Android App exactly!) -->
