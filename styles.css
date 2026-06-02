@@ -154,8 +154,14 @@ body {
   transition: all 0.2s ease;
 }
 
-.btn-outlined-white:hover {
+.btn-outlined-white:hover:not(:disabled) {
   background-color: rgba(255, 255, 255, 0.1);
+}
+
+.btn-outlined-white:disabled {
+  color: var(--text-secondary);
+  border-color: var(--text-secondary);
+  cursor: not-allowed;
 }
 
 .btn-outlined-white-small {

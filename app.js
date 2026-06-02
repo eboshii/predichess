@@ -985,11 +985,23 @@ function drawChessBoardGrid() {
   if (eventsToApply.length > 0) {
     const lastEvent = eventsToApply[eventsToApply.length - 1];
     if (lastEvent.startsWith('trap:')) {
-      const sq = lastEvent.substring(5);
-      trapSq = {
-        row: 8 - parseInt(sq[1], 10),
-        col: sq.charCodeAt(0) - 'a'.charCodeAt(0)
+      const fromSqStr = lastEvent.substring(5);
+      const fromSq = {
+        row: 8 - parseInt(fromSqStr[1], 10),
+        col: fromSqStr.charCodeAt(0) - 'a'.charCodeAt(0)
       };
+      const trapPred = activeGame.predictions ? activeGame.predictions[eventsToApply.length - 1] : "";
+      if (trapPred && trapPred.length >= 4) {
+        const toSqStr = trapPred.substring(2, 4);
+        trapSq = {
+          row: 8 - parseInt(toSqStr[1], 10),
+          col: toSqStr.charCodeAt(0) - 'a'.charCodeAt(0)
+        };
+        lastFrom = fromSq;
+        lastTo = trapSq;
+      } else {
+        trapSq = fromSq;
+      }
     } else if (lastEvent.length >= 4) {
       lastFrom = {
         row: 8 - parseInt(lastEvent[1], 10),
