@@ -1308,8 +1308,8 @@ async function submitTacticalMove(uci) {
         try {
           const batch = writeBatch(db);
           batch.update(doc(db, 'games', activeGameId), {
-            events: arrayUnion(trapEvent),
-            predictions: arrayUnion(prediction),
+            events: [...(activeGame.events || []), trapEvent],
+            predictions: [...(activeGame.predictions || []), prediction],
             status: "finished",
             result: resultStatus,
             pendingPrediction: "",
@@ -1325,8 +1325,8 @@ async function submitTacticalMove(uci) {
 
         try {
           await updateDoc(doc(db, 'games', activeGameId), {
-            events: arrayUnion(trapEvent),
-            predictions: arrayUnion(prediction),
+            events: [...(activeGame.events || []), trapEvent],
+            predictions: [...(activeGame.predictions || []), prediction],
             phase: 'move',
             currentTurn: myTurnStr,
             pendingPrediction: "",
@@ -1339,8 +1339,8 @@ async function submitTacticalMove(uci) {
     } else {
       try {
         await updateDoc(doc(db, 'games', activeGameId), {
-          events: arrayUnion(uci),
-          predictions: arrayUnion(prediction),
+          events: [...(activeGame.events || []), uci],
+          predictions: [...(activeGame.predictions || []), prediction],
           phase: 'predict',
           currentTurn: myTurnStr,
           pendingPrediction: ""
