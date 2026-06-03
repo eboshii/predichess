@@ -1,13 +1,12 @@
 // App.js - Predichess Web Controller
 // Real-time Firestore sync and board interaction mirroring Android styling
 
-import { 
-  ChessBoard, 
-  PieceColor, 
-  PieceType, 
-  GameResult, 
-  ChessMove,
-  BotEngine
+import {
+  ChessBoard,
+  PieceColor,
+  PieceType,
+  GameResult,
+  ChessMove
 } from './chess.js';
 
 // --- FIREBASE IMPORT CDN (Modular SDK) ---
@@ -111,6 +110,8 @@ let lastAnimatedTrapIndex = -1;
 // --- OFFLINE BOT STATE ---
 let botTimeoutId = null;
 let botRunning = false;
+let botWorker = null;
+let botRequestId = 0;
 
 const BotGameStore = {
   PREFS_NAME: "bot_game_prefs",
@@ -1911,6 +1912,18 @@ function handleLocalTrap(game, moveUci) {
   }
 }
 
+function getBotWorker() {
+  if (!botWorker) {
+    botWorker = new Worker('./bot-worker.js', { type: 'module' });
+    botWorker.onmessage = (e) => onBotWorkerMessage(e.data);
+    botWorker.onerror = (err) => {
+      console.error('Bot worker error', err);
+      botRunning = false;
+    };
+  }
+  return botWorker;
+}
+
 function triggerBotAction() {
   if (activeGameId !== 'offline_bot') return;
   if (!activeGame || activeGame.status !== 'active') return;
@@ -1920,109 +1933,119 @@ function triggerBotAction() {
 
   botRunning = true;
   const delayMs = activeGame.phase === 'predict' ? 500 : 1200;
+  // Snapshot the request so a stale worker reply (after the user navigated
+  // away, finished the game, or entered review) can be safely ignored.
+  const requestId = ++botRequestId;
+  const kind = activeGame.phase === 'predict' ? 'predict' : 'move';
+  const events = [...(activeGame.events || [])];
+  const elo = activeGame.botElo || 1200;
 
   if (botTimeoutId) clearTimeout(botTimeoutId);
 
+  // A short delay gives the bot a "thinking" beat; the heavy search then runs
+  // in the worker, so the main thread (and the clock) stay responsive.
   botTimeoutId = setTimeout(() => {
     try {
-      const boardCopy = activeBoard.copy();
-      const elo = activeGame.botElo || 1200;
-      const now = Date.now();
-      const elapsed = now - (activeGame.lastActionTime || now);
-
-      if (activeGame.phase === 'predict') {
-        // Bot predicts player's next move using ELO-scalable prediction sampler
-        const botPrediction = BotEngine.getWeightedPrediction(boardCopy, PieceColor.WHITE, elo);
-        const nextGame = {
-          ...activeGame,
-          pendingPrediction: botPrediction,
-          phase: 'move',
-          currentTurn: 'white',
-          blackTimeLeft: Math.max(0, (activeGame.blackTimeLeft || 1200000) - elapsed),
-          lastActionTime: now
-        };
-        activeGame = nextGame;
-        saveBotGame(nextGame);
-        botRunning = false;
-        renderGameRoom();
-      } else if (activeGame.phase === 'move') {
-        // Bot plays its move using minimax alpha-beta pruning (depth based on ELO)
-        const botMove = BotEngine.getBestMove(boardCopy, PieceColor.BLACK, elo);
-        if (botMove) {
-          const uci = botMove.toUci();
-          const prediction = activeGame.pendingPrediction || "";
-
-          if (prediction && uci === prediction) {
-            // Bot fell into the player's trap!
-            const fromSq = uci.substring(0, 2);
-            const fromCol = uci.charCodeAt(0) - 'a'.charCodeAt(0);
-            const fromRow = 8 - parseInt(uci[1], 10);
-            const piece = boardCopy.squares[fromRow][fromCol];
-            const trapEvent = `trap:${fromSq}`;
-
-            if (piece && piece.type === PieceType.KING) {
-              // Bot King is vaporized -> Player wins!
-              const nextGame = {
-                ...activeGame,
-                events: [...activeGame.events, trapEvent],
-                predictions: [...activeGame.predictions, prediction],
-                status: 'completed',
-                result: 'white_wins',
-                pendingPrediction: "",
-                blackTimeLeft: Math.max(0, (activeGame.blackTimeLeft || 1200000) - elapsed),
-                lastActionTime: now
-              };
-              activeGame = nextGame;
-              saveBotGame(nextGame);
-              BotGameStore.saveToHistory(currentUid || 'anonymous', nextGame);
-              botRunning = false;
-              renderGameRoom();
-              finalizeLocalBotGame(GameResult.CHECKMATE_WHITE_WINS);
-            } else {
-              // Bot piece is vaporized -> Bot gets a compensation move!
-              const nextGame = {
-                ...activeGame,
-                events: [...activeGame.events, trapEvent],
-                predictions: [...activeGame.predictions, prediction],
-                currentTurn: 'black',
-                phase: 'move',
-                pendingPrediction: "",
-                blackTimeLeft: Math.max(0, (activeGame.blackTimeLeft || 1200000) - elapsed),
-                lastActionTime: now
-              };
-              activeGame = nextGame;
-              saveBotGame(nextGame);
-              botRunning = false;
-              renderGameRoom();
-            }
-          } else {
-            // Normal bot move completes successfully
-            const nextGame = {
-              ...activeGame,
-              events: [...activeGame.events, uci],
-              predictions: [...activeGame.predictions, prediction],
-              phase: 'predict',
-              currentTurn: 'black',
-              pendingPrediction: "",
-              blackTimeLeft: Math.max(0, (activeGame.blackTimeLeft || 1200000) - elapsed),
-              lastActionTime: now
-            };
-            activeGame = nextGame;
-            saveBotGame(nextGame);
-            botRunning = false;
-            renderGameRoom();
-          }
-        } else {
-          botRunning = false;
-        }
-      } else {
-        botRunning = false;
-      }
+      getBotWorker().postMessage({ requestId, kind, events, elo });
     } catch (e) {
       console.error(e);
       botRunning = false;
     }
   }, delayMs);
+}
+
+function onBotWorkerMessage(data) {
+  const { requestId, kind, uci } = data || {};
+  // Ignore replies to superseded requests.
+  if (requestId !== botRequestId) return;
+  botRunning = false;
+
+  // Re-validate: the game may have changed while the worker was computing.
+  if (activeGameId !== 'offline_bot' || !activeGame || activeGame.status !== 'active') return;
+  if (reviewIndex !== -1) return; // returning to LIVE re-triggers via renderGameRoom
+  if (activeGame.currentTurn !== 'black') return;
+
+  const now = Date.now();
+  const elapsed = now - (activeGame.lastActionTime || now);
+  const newBlackTime = Math.max(0, (activeGame.blackTimeLeft || 1200000) - elapsed);
+
+  if (kind === 'predict') {
+    if (activeGame.phase !== 'predict') return;
+    const nextGame = {
+      ...activeGame,
+      pendingPrediction: uci || "",
+      phase: 'move',
+      currentTurn: 'white',
+      blackTimeLeft: newBlackTime,
+      lastActionTime: now
+    };
+    activeGame = nextGame;
+    saveBotGame(nextGame);
+    renderGameRoom();
+    return;
+  }
+
+  // Move phase.
+  if (activeGame.phase !== 'move' || !uci) return;
+  const prediction = activeGame.pendingPrediction || "";
+
+  if (prediction && uci === prediction) {
+    // Bot fell into the player's trap!
+    const fromSq = uci.substring(0, 2);
+    const fromCol = uci.charCodeAt(0) - 'a'.charCodeAt(0);
+    const fromRow = 8 - parseInt(uci[1], 10);
+    const piece = activeBoard.squares[fromRow][fromCol];
+    const trapEvent = `trap:${fromSq}`;
+
+    if (piece && piece.type === PieceType.KING) {
+      // Bot King is vaporized -> Player wins!
+      const nextGame = {
+        ...activeGame,
+        events: [...activeGame.events, trapEvent],
+        predictions: [...activeGame.predictions, prediction],
+        status: 'completed',
+        result: 'white_wins',
+        pendingPrediction: "",
+        blackTimeLeft: newBlackTime,
+        lastActionTime: now
+      };
+      activeGame = nextGame;
+      saveBotGame(nextGame);
+      BotGameStore.saveToHistory(currentUid || 'anonymous', nextGame);
+      renderGameRoom();
+      finalizeLocalBotGame(GameResult.CHECKMATE_WHITE_WINS);
+    } else {
+      // Bot piece is vaporized -> Bot gets a compensation move!
+      const nextGame = {
+        ...activeGame,
+        events: [...activeGame.events, trapEvent],
+        predictions: [...activeGame.predictions, prediction],
+        currentTurn: 'black',
+        phase: 'move',
+        pendingPrediction: "",
+        blackTimeLeft: newBlackTime,
+        lastActionTime: now
+      };
+      activeGame = nextGame;
+      saveBotGame(nextGame);
+      renderGameRoom();
+    }
+  } else {
+    // Normal bot move completes successfully
+    const nextGame = {
+      ...activeGame,
+      events: [...activeGame.events, uci],
+      predictions: [...activeGame.predictions, prediction],
+      phase: 'predict',
+      currentTurn: 'black',
+      pendingPrediction: "",
+      blackTimeLeft: newBlackTime,
+      lastActionTime: now
+    };
+    activeGame = nextGame;
+    saveBotGame(nextGame);
+    renderGameRoom();
+  }
 }
 
 function finalizeLocalBotGame(result) {
